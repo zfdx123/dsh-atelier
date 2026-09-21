@@ -46,7 +46,7 @@ dsh plugin --profile web add @zfdx123/dsh-memery
 
 ```
 packages/
-  dsh-atelier/                # 本入口包（纯聚合，不注册任何东西）
+  dsh-atelier/                # 本入口包（纯聚合，patch 把上面 7 个插件一起插入）
   dsh-codegraph/
   dsh-mcp-manager/
   dsh-memery/
