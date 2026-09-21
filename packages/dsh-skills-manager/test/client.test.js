@@ -8,8 +8,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+// fileURLToPath 而不是 URL.pathname：后者是百分号编码的（检出路径里带空格或非 ASCII
+// 就读到别的文件上），而且在 Windows 上会多一个前导斜杠（`/E:/...`）。
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /** 最小 React 替身：只要支持 createElement 与几个 hook 即可。 */
 function fakeReact() {

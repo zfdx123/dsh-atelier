@@ -418,22 +418,20 @@ test('assertSkillPath 挡住越界、点目录与只读根', async () => {
   assert.throws(() => assertSkillPath(readonlyRoots, inside), /只读|不在任何可写/)
 })
 
-test('isInside 在跨盘符、盘根与同级目录上都不会误判（回归）', async () => {
+test('isInside 在根目录、盘内其它位置与同级目录上都不会误判（回归）', async () => {
   // 真实踩过的坑：Windows 上不同盘符之间 path.relative() 返回的是**绝对路径**
   // （`C:\Windows\x`），它不以 `..` 开头。只做前缀判断会把整块盘判成「在根目录
   // 之内」，于是 readSkill('C:/Windows/win.ini') 会被放行。这里钉死该行为。
-  const driveRoot = resolvePath(sep).slice(0, 2) // 'E:'
-  const absoluteDriveRoot = resolvePath(sep + sep) // 'E:\'
+  // 根在两种平台上都取 resolve(sep + sep)：Windows 是当前盘根 `E:\`，POSIX 是 `/`。
+  const absoluteRoot = resolvePath(sep + sep)
   assert.equal(
-    isInside(process.cwd(), resolvePath(join(driveRoot, 'Windows', 'win.ini'))),
+    isInside(process.cwd(), resolvePath(join(absoluteRoot, 'Windows', 'win.ini'))),
     false,
     '盘内其它位置不能被判成在 cwd 之内',
   )
-  // 绝对盘根 `E:\` 在路径语义上**确实**包含盘上的一切；正因为它这么宽，
-  // 才必须保证技能根永远不会解析到盘根（下一条测试专门守这件事）。
-  assert.equal(isInside(absoluteDriveRoot, process.cwd()), true)
-  // `E:` 是「该盘当前目录」这种 drive-relative 形式，不构成稳定的包含关系。
-  assert.equal(isInside(driveRoot, process.cwd()), false)
+  // 绝对根在路径语义上**确实**包含它下面的一切；正因为它这么宽，
+  // 才必须保证技能根永远不会解析到根（下一条测试专门守这件事）。
+  assert.equal(isInside(absoluteRoot, process.cwd()), true)
 
   // 同级/父级/自身
   const base = join(sandbox, 'a')
@@ -448,6 +446,15 @@ test('isInside 在跨盘符、盘根与同级目录上都不会误判（回归�
   assert.equal(isInside(base, ''), false)
   assert.equal(isInside(undefined, base), false)
   assert.equal(isInside(base, undefined), false)
+})
+
+// `E:` 是 Windows 独有的「盘符相对」形式：resolve('E:') 取的是**该盘的当前目录**，
+// 不是该盘的根，所以它不构成稳定的包含关系。POSIX 没有对应物——resolve('/') 就是
+// 文件系统根，它属于上面那条 true 断言。所以这一条只在 Windows 上跑。
+test('isInside 不把盘符相对的 `E:` 当成包含（Windows 专有形式）', { skip: process.platform !== 'win32' }, () => {
+  const driveRelative = resolvePath(sep).slice(0, 2) // 'E:'
+  assert.notEqual(driveRelative, resolvePath(sep + sep), '盘符相对与盘根必须是两种形式')
+  assert.equal(isInside(driveRelative, process.cwd()), false)
 })
 
 test('盘根不会成为技能根：resolveRoots 的结果永远不是驱动器根', () => {

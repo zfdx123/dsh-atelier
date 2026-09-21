@@ -13,6 +13,8 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
+import { tmpdir } from 'node:os'
+import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context, Service } from '@deepseek-ai/cordis'
 import * as Manager from '../index.js'
@@ -30,6 +32,13 @@ if (!Promise.withResolvers) {
 }
 
 const FAKE_SERVER = fileURLToPath(new URL('../fixtures/fake-mcp-server.mjs', import.meta.url))
+
+// 「绝对、且必然不存在」的可执行文件。前置检查的脚本/工作目录分支看
+// node:path 的 isAbsolute，但可执行文件分支只看「带分隔符 + 不存在」，所以两边
+// 都必须给一个**本平台**的真·绝对路径：原夹具 `/nonexistent-binary-xyz` 在
+// Windows 上只是「当前盘根目录下的一个名字」，并不是 Windows 意义上的绝对路径。
+// 从系统临时目录派生，两边都真·绝对且不存在。
+const MISSING_BINARY = resolve(tmpdir(), 'dsh-mcp-manager-absent', 'nonexistent-binary-xyz')
 const STDIO = (name, extra = {}) => ({
   serverName: name,
   enabled: true,
@@ -287,9 +296,13 @@ describe('端到端：保存即生效（内存 cordis + 假 stdio MCP 服务器�
   let harness
   let base
   let disposer
+  // 管理器自己打出的告警：前置检查的判定只有在这里才是**稳定**可断言的
+  // （理由见「状态跟踪：不存在的命令」那条测试）。
+  const logs = []
 
   before(async () => {
     harness = buildHarness()
+    harness.app.logger.exporter({ levels: { default: 3 }, export: (m) => logs.push(String(m.args?.[0] ?? '')) })
     disposer = harness.app.plugin(Manager)
     base = `http://127.0.0.1:${await harness.webServer.listen()}/api/mcp/servers`
   })
@@ -342,7 +355,7 @@ describe('端到端：保存即生效（内存 cordis + 假 stdio MCP 服务器�
 
   it('状态跟踪：不存在的命令 → 状态 error（日志截获驱动，异步真实失败）', async () => {
     await request(base, 'POST', {
-      servers: [STDIO('fake'), STDIO('broken', { command: '/nonexistent-binary-xyz', failOnStartupError: true })],
+      servers: [STDIO('fake'), STDIO('broken', { command: MISSING_BINARY, failOnStartupError: true })],
     })
     const brokenStatus = await waitFor(
       async () => {
@@ -351,8 +364,23 @@ describe('端到端：保存即生效（内存 cordis + 假 stdio MCP 服务器�
       },
       { label: 'broken 状态变为 error' },
     )
-    // 现在有前置检查：可执行文件不存在会直接点名，而不是只给一句笼统的连接失败
-    assert.match(brokenStatus.message, /找不到可执行文件：\/nonexistent-binary-xyz/)
+    assert.equal(brokenStatus.state, 'error')
+
+    // 前置检查确实点名了那个不存在的可执行文件——断言打在它**稳定**的载体上。
+    //
+    // 这里原本断言的是挂载状态里那句 `找不到可执行文件：…`，而那句话只存在于
+    // mountOne 写下它、到 mcp-client 真实 spawn 失败把它覆盖掉之间的窗口里。
+    // 窗口长度完全取决于平台怎么「启动失败」：Windows 上要去 shell 里试一圈路径
+    // （实测有 50~200ms），测试的首次轮询刚好落在窗口内；Linux 的 ENOENT 在同一轮
+    // 事件循环里就回来了（实测 <1ms），于是同一个断言在 Linux 上必然只能看到
+    // `连接失败：Error: spawn … ENOENT`。也就是说原断言依赖的是「Windows 启动
+    // 失败慢」，不是任何平台的差异行为——它在两边不可能同时成立。
+    // 前置检查的判定本身由 index.js 打的那条告警承载（先于任何 mcp-client 日志），
+    // 这才是可以跨平台稳定断言的地方。
+    assert.ok(
+      logs.some((line) => line.includes(`启动前置检查未通过：找不到可执行文件：${MISSING_BINARY}`)),
+      `应有前置检查告警，最近的日志：${JSON.stringify(logs.slice(-4))}`,
+    )
 
     // fake 服务器不受影响
     const get = await request(base, 'GET')
@@ -504,18 +532,25 @@ describe('端到端：整条命令行粘进表单也能跑通（真实故障回�
 
   it('前置检查：可执行文件不存在时直接给出原因（而不是 -32000 Connection closed）', async () => {
     const { status } = await request(base, 'POST', {
-      servers: [STDIO('ghost', { command: '/nonexistent-binary-xyz', args: [] })],
+      servers: [STDIO('ghost', { command: MISSING_BINARY, args: [] })],
     })
     assert.equal(status, 200)
     const entry = await waitFor(
       async () => {
         const res = await request(base, 'GET')
         const current = res.data.status.ghost
-        return current && current.state === 'error' && /找不到可执行文件/.test(current.message) ? current : undefined
+        return current && current.state === 'error' ? current : undefined
       },
-      { label: 'ghost 状态给出「找不到可执行文件」' },
+      { label: 'ghost 状态变为 error' },
     )
-    assert.match(entry.message, /启动前置检查未通过：找不到可执行文件：\/nonexistent-binary-xyz/)
+    assert.equal(entry.state, 'error')
+    // 原因断言在管理器自己那条告警上：状态里的前置检查文案是瞬时的，真实的
+    // spawn 失败紧接着就把它覆盖掉了（Linux 上在测试来得及轮询之前就没了，
+    // 见上一条测试的说明）。
+    assert.ok(
+      logs.some((line) => line.includes(`启动前置检查未通过：找不到可执行文件：${MISSING_BINARY}`)),
+      `应有「找不到可执行文件」的前置检查告警，最近的日志：${JSON.stringify(logs.slice(-4))}`,
+    )
   })
 })
 

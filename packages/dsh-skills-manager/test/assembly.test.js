@@ -778,8 +778,16 @@ test('HTTP 路由对非法 JSON 与未知 action 返回可读错误', async () =
     assert.equal(unknown.body.error.includes('未知 action'), true)
 
     // 业务错误（越界路径）也必须是 400 + 可读原因，而不是 500。
-    const denied = await callRoute(route, makeReq(JSON.stringify({ action: 'read', path: 'C:/Windows/win.ini' })))
-    assert.equal(denied.status, 400, `越界路径应被拒。cwd=${process.cwd()} 实际响应：${JSON.stringify(denied.body)}`)
+    // 越界路径用 tmpdir 下的绝对路径构造：两种平台上它都确实在所有技能根之外。原来的
+    // 夹具 `C:/Windows/win.ini` 只在 Windows 上才是绝对路径，在 POSIX 上会被当成相对
+    // 路径解析到 cwd 之下——同一行断言在两个平台上测的就不是同一件事了。
+    const outside = join(tmpdir(), 'skills-manager-outside-the-roots', 'win.ini')
+    const denied = await callRoute(route, makeReq(JSON.stringify({ action: 'read', path: outside })))
+    assert.equal(
+      denied.status,
+      400,
+      `越界路径应被拒。cwd=${process.cwd()} 路径=${outside} 实际响应：${JSON.stringify(denied.body)}`,
+    )
     assert.equal(denied.body.ok, false)
   } finally {
     await rm(sandbox, { recursive: true, force: true })
