@@ -39,6 +39,9 @@
       "optional": true
     }
   },
+  "dependencies": {
+    "@colbymchenry/codegraph": "^1.6.0"
+  },
   "devDependencies": {
     "@deepseek-ai/dsh-llm": "^0.1.6-alpha.1",
     "@deepseek-ai/dsh-tools": "^0.1.6-alpha.1",

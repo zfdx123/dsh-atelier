@@ -3,15 +3,15 @@
  * SRC-01 drift probe: do the documented `order` neighbours still match the
  * prompt-section orders of the installed DSH?
  *
- * Why this exists: README.md:64, README.zh.md:64 and the `DEFAULT_ORDER` JSDoc
- * in index.js:36-38 all state that the bootstrap sits after the deployment
- * persona prefix (0) and before the plan policy (500) and tool guidance
- * (1000+). An earlier revision of those three sites claimed the tool guidance
- * lived in 100–199 — that band belongs to `CONTEXT_ORDERS` (dynamic runtime
- * context), and the claim would have led a maintainer to place the section
- * after the tools. The probe therefore checks both halves: that every site
- * still states the current neighbours, and that the installed dsh still has
- * them, so the plugin's default of 50 stays correctly placed.
+ * Why this exists: the `order` row of README.md and README.en.md plus the
+ * `DEFAULT_ORDER` JSDoc in index.js:36-38 all state that the bootstrap sits
+ * after the deployment persona prefix (0) and before the plan policy (500) and
+ * tool guidance (1000+). An earlier revision of those three sites claimed the
+ * tool guidance lived in 100–199 — that band belongs to `CONTEXT_ORDERS`
+ * (dynamic runtime context), and the claim would have led a maintainer to place
+ * the section after the tools. The probe therefore checks both halves: that
+ * every site still states the current neighbours, and that the installed dsh
+ * still has them, so the plugin's default of 50 stays correctly placed.
  *
  * Read-only: reads source files, starts nothing, writes nothing, no network.
  *
@@ -42,7 +42,7 @@ const failures = []
 /** Every source site that states the bootstrap's neighbours. */
 const claimSites = [
   { file: 'README.md', match: /^\|\s*`order`\s*\|.*$/m },
-  { file: 'README.zh.md', match: /^\|\s*`order`\s*\|.*$/m },
+  { file: 'README.en.md', match: /^\|\s*`order`\s*\|.*$/m },
   { file: 'index.js', match: /^ \* \(0\), and before the plan policy.*$/m },
 ].map((site) => {
   const source = read(resolve(PLUGIN_ROOT, site.file))

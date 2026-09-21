@@ -290,7 +290,7 @@ test('reports a failing skill lookup without failing agent creation', async () =
 })
 
 test('documents the prompt-order placement the same way in code and both READMEs', async () => {
-  const sources = ['index.js', 'README.md', 'README.zh.md']
+  const sources = ['index.js', 'README.md', 'README.en.md']
   for (const source of sources) {
     const text = await readFile(join(packageRoot, source), 'utf8')
     assert.doesNotMatch(text, /100\s*[–-]\s*199/, `${source} still claims the stale tool-guidance band`)
@@ -300,14 +300,14 @@ test('documents the prompt-order placement the same way in code and both READMEs
 })
 
 test('keeps the English and Chinese READMEs structurally in sync', async () => {
-  const [english, chinese] = await Promise.all(
-    ['README.md', 'README.zh.md'].map((file) => readFile(join(packageRoot, file), 'utf8')),
+  const [chinese, english] = await Promise.all(
+    ['README.md', 'README.en.md'].map((file) => readFile(join(packageRoot, file), 'utf8')),
   )
   for (const pattern of [/^#{2,3} /gm, /^\| /gm, /^```/gm, /^```sh$/gm]) {
     assert.equal(
-      [...chinese.matchAll(pattern)].length,
       [...english.matchAll(pattern)].length,
-      `README.zh.md and README.md disagree on ${pattern}`,
+      [...chinese.matchAll(pattern)].length,
+      `README.en.md and README.md disagree on ${pattern}`,
     )
   }
 })

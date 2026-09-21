@@ -3,7 +3,7 @@
  * SRC-02 mechanism probe: does a preset that owns the complete system prompt
  * still drop this plugin's bootstrap section in the installed DSH?
  *
- * Why this exists: README.md "Limitations" and README.zh.md "已知限制" record
+ * Why this exists: README.md "已知限制" and README.en.md "Limitations" record
  * that a preset whose persona declares `complete: true` — the bundled `minimal`
  * preset does — replaces the whole system prompt, so `superpowers:bootstrap` is
  * never delivered there. That claim is about DSH's registry, not about this
@@ -123,7 +123,7 @@ check(
 process.stdout.write(
   failures.length === 0
     ? `\nLIMITATION HOLDS: ${PERSONA} with complete: true is the sole prompt section, so ${BOOTSTRAP} is dropped there and no listener can restore it.\n\n`
-    : `\nMECHANISM CHANGED: ${failures.length} documented behaviour(s) no longer hold; update README.md and README.zh.md.\n\n`,
+    : `\nMECHANISM CHANGED: ${failures.length} documented behaviour(s) no longer hold; update README.md and README.en.md.\n\n`,
 )
 
 process.exit(failures.length === 0 ? 0 : 1)

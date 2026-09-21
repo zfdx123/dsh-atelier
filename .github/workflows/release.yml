@@ -23,15 +23,18 @@ jobs:
           node-version: '24'
       - name: npm 11.5.1+ (OIDC publishing)
         run: npm install -g npm@latest
-      - name: toolchain the packages' own suites need
-        run: |
-          # pnpm: dsh-plugin-hooks-ordering and dsh-skills-manager are pnpm-locked
-          # @colbymchenry/codegraph: dsh-codegraph's suite exercises the real CLI and
-          #   exits 1 when it is missing, by design
-          npm install -g pnpm@10 @colbymchenry/codegraph
+      - name: pnpm (dsh-plugin-hooks-ordering and dsh-skills-manager are pnpm-locked)
+        # `@colbymchenry/codegraph` used to be installed globally here: the
+        # dsh-codegraph suite exercises the real CLI and exits 1 when it is
+        # missing. It is now a declared dependency of that package, so
+        # `npm run install:all` (below) installs it and the suite resolves the
+        # shim from the package's own node_modules/.bin.
+        run: npm install -g pnpm@10
       - run: npm install
-      - run: npm run check
+      # install first: dsh-memery and dsh-plugin-hooks-ordering ship lib/ as a
+      # build output, so the release gate can only see main/exports after a build
       - run: npm run install:all
+      - run: npm run check
       - run: npm test
 
   publish:

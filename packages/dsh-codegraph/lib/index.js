@@ -39,15 +39,18 @@
 // executor's own mount and can fail the whole plugin tree at boot (observed
 // in the wild: intermittent "neither subprocess nor shell mounted" boot
 // crashes). Lazy resolution also lets the tools start working if an executor
-// mounts after this plugin. The `codegraph` executable must be on PATH (e.g.
-// global `npm i -g @colbymchenry/codegraph` or the npm thin shim); a clearer
-// error is thrown when it is missing.
+// mounts after this plugin. The `codegraph` executable is resolved by
+// lib/executable.js: this package's own `node_modules/.bin` first (the declared
+// `@colbymchenry/codegraph` dependency installs there — that directory is NOT
+// on PATH), then PATH, so a global `npm i -g @colbymchenry/codegraph` (or the
+// official install.sh / thin shim) keeps working; a clearer error is thrown
+// when it is missing. `DSH_CODEGRAPH_EXECUTABLE` pins one path explicitly.
 //
 // Harness contract: verified against DSH `0.1.5-rc.1` (CLI) with its
 // `0.1.5-rc.2` first-party packages, re-verified against DSH `0.1.6-alpha.1`,
 // and RE-VERIFIED AGAIN against DSH `0.1.6-alpha.2` — the CLI running this
 // checkout and the first-party packages its devDependencies install; that run
-// is `npm test` → 49 passed / 0 failed. `peerDependencies` and `engines.dsh`
+// is `npm test` → 58 passed / 0 failed. `peerDependencies` and `engines.dsh`
 // declare `^0.1.6-alpha.1`, which admits the same-tuple prereleases
 // (`0.1.6-alpha.2`) plus `0.1.6`/`0.1.7` and excludes the 0.1.5 line — semver
 // matches a prerelease only against a comparator carrying the same
@@ -76,6 +79,7 @@ import { dirname, join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
+import { executableHint, resolveCodegraphExecutable } from './executable.js'
 
 export const name = 'dsh-codegraph'
 
@@ -148,10 +152,6 @@ function truncate(text, max) {
 
 function shQuote(value) {
   return "'" + String(value).replace(/'/g, "'\\''") + "'"
-}
-
-function executableHint() {
-  return '`codegraph` was not found on PATH. Install it once, e.g. `npm i -g @colbymchenry/codegraph` (or use the official install.sh / npm thin shim), then retry.'
 }
 
 // Failure text for one finished `codegraph` run. A null `exitCode` is NOT an
@@ -339,9 +339,18 @@ export function apply(ctx, config = {}) {
     if (sub !== undefined) {
       if (resolvedExe.value === null) {
         try {
-          resolvedExe.value = await sub.resolveExecutable('codegraph')
-        } catch {
-          throw new Error('dsh-codegraph: ' + executableHint())
+          // Package-local `.bin` first (the declared `@colbymchenry/codegraph`
+          // dependency lives there, off PATH), then PATH through the
+          // subprocess service (global installs keep working).
+          resolvedExe.value = await resolveCodegraphExecutable({
+            resolveExecutable: (name) => sub.resolveExecutable(name),
+          })
+        } catch (error) {
+          // The resolver names its cause (a missing `DSH_CODEGRAPH_EXECUTABLE`
+          // path vs. nothing installed anywhere, which falls back to the
+          // install hint); prefix it so the message is attributable here.
+          const detail = error && error.message ? error.message : executableHint()
+          throw new Error('dsh-codegraph: ' + detail)
         }
       }
       const proc = sub.spawn({
@@ -377,6 +386,10 @@ export function apply(ctx, config = {}) {
       }
       return text
     }
+    // Shell fallback: a bare `codegraph` for the shell to resolve from ITS
+    // PATH. Deliberately not rewritten to the package-local shim — the command
+    // is a shell string, and on Windows the shim is a `.cmd` that a POSIX shell
+    // cannot execute. Exit 127 keeps the install hint.
     const command = 'codegraph ' + argv.map(shQuote).join(' ')
     const spec = shell.resolve({
       command,

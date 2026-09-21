@@ -1,56 +1,46 @@
-# dsh-superpowers
+# @zfdx123/dsh-superpowers
 
-English | [中文](README.zh.md)
+把 [obra/superpowers](https://github.com/obra/superpowers) 的软件开发方法论接进 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：在 `ctx.skills` 上注册 14 个技能（需求澄清、任务规划、TDD、系统化调试、代码审查等），并把 `using-superpowers` 引导语作为系统提示词段落注入，让它从第一条请求起就生效、在上下文压缩后依然存在。技能是**运行时注册**的、不落盘，所以既不往 `~/.dsh/skills` 复制任何文件，也不要求改动预设或 profile 里的技能目录。当前版本 1.0.0，面向 DSH `^0.1.6-alpha.1`。
 
-dsh-superpowers adds [obra/superpowers](https://github.com/obra/superpowers) support to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It registers 14 skills for brainstorming, planning, TDD, debugging, and code review, and keeps the `using-superpowers` bootstrap active throughout the session.
-
-## Contents
-
-- [Installation](#installation)
-- [What it does](#what-it-does)
-- [Verification](#verification)
-- [Configuration](#configuration)
-- [Limitations](#limitations)
-- [Overhead](#overhead)
-- [Testing](#testing)
-- [Requirements](#requirements)
-- [Upstream and license](#upstream-and-license)
-
-## Installation
-
-Add the package to the profile as a local workspace dependency, then restart the surface:
+## 安装
 
 ```sh
-cd E:/work/ai/dsh-superpowers && npm install   # the config schema is a runtime dependency
-dsh plugin --profile web add link:E:/work/ai/dsh-superpowers
+# 从 npm 安装单个包
+dsh plugin --profile web add @zfdx123/dsh-superpowers
+
+# 一次装齐整套（MCP 管理器、技能管理器、记忆、CodeGraph、钩子排序、会话清理、Superpowers）
+dsh plugin --profile web add @zfdx123/dsh-atelier
+
+# 本地开发：link: 安装之前先在检出目录装依赖——配置 schema 是运行时依赖
+cd /path/to/dsh-atelier/packages/dsh-superpowers && npm install
+dsh plugin --profile web add link:/path/to/dsh-atelier/packages/dsh-superpowers
 ```
 
-Stop and restart `dsh web` afterwards. Replace `web` with `headless` or a custom profile name when installing for a different surface, then restart that surface instead.
+装完先停止再重启 `dsh web`（bundle 不做热加载）。装到别的形态就把 `web` 换成 `headless` 或自定义 profile 名，并重启对应形态。
 
-## What it does
+## 快速上手
 
-- Registers all 14 Superpowers skills on `ctx.skills`. They appear in the skill catalog and load through the native `skill` tool. Nothing is copied into `~/.dsh/skills`.
-- Adds the `using-superpowers` bootstrap as the `superpowers:bootstrap` prompt section at order 50. It is present on the first request and survives context compaction because it is part of the system prompt, not a one-off session message. A preset that owns the whole system prompt replaces it — see [Limitations](#limitations).
-- Warns on the first agent of a workspace when a project or preset skill shadows one of the bundled names, naming the copy the model will load instead.
-- Maps Claude Code-style tool names such as `Task`, `TodoWrite`, and `Bash`/`Read`/`Write`/`Edit` to their DeepSeek Harness equivalents. The mapping also notes that hooks and slash commands are not available.
-
-## Verification
-
-Check that the plugin is present in the profile:
+先确认插件已经挂进 profile：
 
 ```sh
 dsh --profile web --dump-config
 ```
 
-The output should contain `id: superpowers` followed by `name: @zfdx123/dsh-superpowers`.
+输出里应当出现 `id: superpowers`，紧跟其后是 `name: @zfdx123/dsh-superpowers`。然后新建一个会话，直接提一个功能需求：agent 应当先探查现状、再给出问题或设计，而不是立刻开始写代码；它的工具调用里应当出现 `skill`。
 
-Then start a new session and ask for a feature. The agent should explore first and respond with questions or a design instead of writing code immediately. Its tool calls should include `skill`.
+如果 bootstrap 始终没有出现，请检查该会话所用的预设——当预设的 persona 独占完整系统提示词时，它按设计就不会下发，见[已知限制](#已知限制)。
 
-If the bootstrap never arrives, check the session's preset: a preset whose persona owns the complete system prompt is the one case where it is absent by design — see [Limitations](#limitations).
+## 它做什么
 
-## Configuration
+- 在 `ctx.skills` 注册全部 14 个技能。它们出现在技能目录里，并通过原生 `skill` 工具按需加载；`~/.dsh/skills` 不会被写入任何东西。
+- 把 `using-superpowers` 注册为 `superpowers:bootstrap` 提示词段落，order 50：位于 persona 前缀（0）之后、计划策略（500）与工具指导（1000+）之前。它在第一条请求就存在，并能在上下文压缩后继续存在——因为它属于系统提示词，而不是一次性会话消息。
+- 每个工作区的首个 agent 创建时，若某个内置技能名被项目技能或预设技能遮蔽，会告警一次，并指明模型实际会加载的那份副本（provider、来源与路径）。只报一次，因为同一会话的子 agent 共享同一套组合，重复告警没有信息量。
+- 把 Claude Code 风格的工具名映射到 DSH 的工具词汇：`Task` → `subagent`、`TodoWrite` → `todo_write`、`Bash`/`Read`/`Write`/`Edit`/`Glob`/`Grep` → 对应的小写工具等。映射里同时说明当前环境不提供 hooks 与斜杠命令 API，所以遇到「安装 hook / 注册斜杠命令」的指令时，应改用这些工具把活干完。
+- 两个注册表都只经 `ctx` 访问（`systemPrompt`、`skills`），因此不依赖任何 `@deepseek-ai/*` 服务包从本包目录解析出来。
 
-Every field is optional. Override fields in the profile's own `cordis.patch.yml`:
+## 配置
+
+所有字段都是可选的，在 profile 自己的 `cordis.patch.yml` 里按行覆盖：
 
 ```yaml
 - id: superpowers
@@ -58,52 +48,46 @@ Every field is optional. Override fields in the profile's own `cordis.patch.yml`
     bootstrap: false
 ```
 
-| Field | Default | Description |
+| 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `skills` | `true` | Register the bundled skills on `ctx.skills`. |
-| `bootstrap` | `true` | Register the `using-superpowers` prompt section. |
-| `toolMapping` | `true` | Append the DeepSeek Harness tool mapping to the bootstrap section. |
-| `order` | `50` | Place the bootstrap after the persona prefix (0), before the plan policy (500) and tool guidance (1000+). |
+| `skills` | `true` | 把内置技能注册到 `ctx.skills`。 |
+| `bootstrap` | `true` | 注册 `using-superpowers` 提示词段落。 |
+| `toolMapping` | `true` | 在 bootstrap 段落里追加 DeepSeek Harness 工具映射。 |
+| `order` | `50` | bootstrap 段落的 order：persona 前缀（0）之后、计划策略（500）与工具指导（1000+）之前。 |
 
-Every field is validated against the plugin's schema before it applies: a misspelled type fails the profile with the offending field named, instead of half-registering the plugin.
+每个字段在生效前都会先过插件自己的 schema（`@deepseek-ai/schemastery`）：类型写错时 profile 会直接失败并指出出错字段，而不是把插件注册到一半。设置 `bootstrap: false` 之后技能仍可被发现，但不会再自动触发——模型只在自己决定查询技能目录时才会用到它们。bootstrap 段落给每次请求的系统提示词增加约 1.1k token（实测 4,465 字符）；这段内容是静态的、位于缓存前缀内，不会在每一轮作为新的聊天消息追加，所以 `bootstrap: false` 正是去掉这份固定开销的做法。
 
-Setting `bootstrap: false` keeps the skills discoverable but stops them from self-triggering; the model will use them only when it decides to consult the catalog.
+## 前置要求
 
-## Limitations
+- DeepSeek Harness `^0.1.6-alpha.1`（`engines.dsh`）
+- Node `^22.19.0 || >=24.0.0`
+- peer `@deepseek-ai/cordis ^4.0.2`，以及可选的 peer `@deepseek-ai/dsh-skill`、`@deepseek-ai/dsh-system-prompt`（均为 `^0.1.6-alpha.1`）
+- 一个运行时依赖 `@deepseek-ai/schemastery`（提供配置 schema）：从 registry 安装会自动带上；用 `link:` 安装需要先在检出目录执行 `npm install`，否则插件加载失败
 
-A preset can own the entire system prompt. When the preset's persona declares itself the complete prompt — the bundled `minimal` preset does, with `complete: true` — the prompt registry restores that one section after assembly and drops every other section, including `superpowers:bootstrap`. The drop is silent, and dsh publishes no signal for it: a section's `complete` flag never leaves the registry, and a `system-prompt/assemble` listener cannot append prompt text to a scope that has one. The plugin therefore registers the section and documents the case rather than guessing; `verify/src-02-complete-persona-shadow.mjs` pins the mechanism against the installed dsh.
+## 已知限制
 
-Under such a preset:
+**bootstrap 段落会被 complete persona 预设按设计丢掉。** 预设可以独占整个系统提示词：当预设的 persona 声明自己就是完整提示词时——内置的 `minimal` 预设正是如此（`complete: true`）——提示词注册表会在装配结束后只保留那一个段落，丢掉包括 `superpowers:bootstrap` 在内的其他所有段落。这一丢弃是静默的，而且 dsh 不发布任何相关信号：段落的 `complete` 标记不会离开注册表，`system-prompt/assemble` 监听器也无法向存在 complete 段落的 scope 追加提示词文本。因此本插件照常注册该段落、把这种情况写进文档，而不是去猜。
 
-- The bootstrap is not delivered, so the skills never self-trigger. The 14 skills are still registered on `ctx.skills`, but whether the model can reach them is the preset's decision, because the preset also decides which tools exist — `minimal` exposes only the persistent shell, so no `skill` tool is available there either.
-- `bootstrap: true` cannot make the section appear, and `bootstrap: false` reports nothing: the section was never going to be delivered.
+在该类预设下：
 
-Use a preset whose persona is not complete to get the bootstrap.
+- bootstrap 不会下发，技能因此不会自动触发。14 个技能仍注册在 `ctx.skills` 上，但模型能否取到它们由预设决定——预设同时决定有哪些工具：`minimal` 只挂常驻 shell，所以那里也没有 `skill` 工具。
+- `bootstrap: true` 不会让它出现，`bootstrap: false` 也不会有任何提示：这个段落本来就不会下发。
 
-## Overhead
+要拿到 bootstrap，请使用 persona 不是 complete 的预设。这条限制由可执行探针钉住：`verify/src-02-complete-persona-shadow.mjs` 会挂载真实的 `SystemPrompt`、`SkillRegistry` 与 scope 机制、按加载器的方式应用本插件，并断言「带 complete persona 的 scope 只交付它自己，且任何 `system-prompt/assemble` 监听器都补不回来」；机制一旦变化，探针会失败并提示文档已经过期。
 
-The bootstrap adds roughly 1.1k tokens (4,465 characters) to the system prompt of each request. The section is static and stays within the cached prefix. It is not appended as a new chat message on every turn. Set `bootstrap: false` to keep the skills without the fixed prompt overhead.
+## 开发
 
-## Testing
+```sh
+npm test                                         # node --test
+node verify/dsh-compat.mjs                       # 运行时与打包契约
+node verify/src-01-doc-order-drift.mjs           # 文档里的 order 区间 vs 已安装的段落顺序
+node verify/src-02-complete-persona-shadow.mjs   # 上面那条 complete persona 限制的机制
+```
 
-`npm test` runs the suite through `node --test`. `test/` ships in the published tarball, so the command works from an installed copy as well as from a checkout.
+`test/` 随发布产物一起发布，所以在安装后的副本里和源码检出里都能直接跑 `npm test`。`verify/` 是维护者专用的探针：不随包发布，需要本机装有 dsh（第一个参数都可传入另一份 dsh 的 `package.json` 路径，`src-01` 的第一个参数则是插件根目录）。
 
-`verify/` holds maintainer-only probes that mount the real dsh service classes. They are not published, and they need a local dsh installation (pass its `package.json` path as the first argument to point at another one):
+## 许可
 
-- `verify/dsh-compat.mjs` — every runtime and packaging contract this plugin depends on.
-- `verify/src-01-doc-order-drift.mjs` — the documented prompt-order band against the installed section orders.
-- `verify/src-02-complete-persona-shadow.mjs` — the complete-persona drop recorded under [Limitations](#limitations).
+`skills/` 下的技能原样取自 [obra/superpowers](https://github.com/obra/superpowers) v6.3.0，对应 commit [`b36e082`](https://github.com/obra/superpowers/commit/b36e0829c6d0140e93cfef2ca599b1b07d4a7797)，未做修改；`package.json` 的 `superpowers` 字段记录了确切的上游版本、commit 与仓库地址。`brainstorming` 的可选视觉组件会从上游网站加载带 Superpowers 版本号的 logo，不包含项目或提示词内容；把 `SUPERPOWERS_DISABLE_TELEMETRY` 设为任一 true 值即可关闭。
 
-## Requirements
-
-- DeepSeek Harness `0.1.0-rc.6` or newer
-- Node.js 22.19+ or 24+
-- One runtime dependency, `@deepseek-ai/schemastery`, which provides the config schema. A registry install pulls it in; a `link:` install needs `npm install` in the checkout first, or the plugin fails to load. Every other registry is reached through `ctx`.
-
-## Upstream and license
-
-The skills under `skills/` are vendored unmodified from [obra/superpowers](https://github.com/obra/superpowers) v6.3.0 at commit [`b36e082`](https://github.com/obra/superpowers/commit/b36e0829c6d0140e93cfef2ca599b1b07d4a7797). The exact upstream version and commit are recorded in `package.json`.
-
-The optional visual companion in `brainstorming` loads an upstream-hosted logo containing the Superpowers version. It sends no project or prompt content. Set `SUPERPOWERS_DISABLE_TELEMETRY` to a true value to disable it.
-
-Two MIT license notices apply: the adapter is © its contributors under [LICENSE](LICENSE), while the bundled skills are © Jesse Vincent and the Superpowers contributors under [LICENSE.superpowers](LICENSE.superpowers).
+这里同时适用两份 MIT 许可声明：适配器版权归其贡献者所有，依据 [LICENSE](LICENSE) 许可；内置技能版权归 Jesse Vincent 与 Superpowers 贡献者所有，依据 [LICENSE.superpowers](LICENSE.superpowers) 许可。中文文档 `README.md` 是本包的主文档，英文版见 [README.en.md](README.en.md)。

@@ -48,7 +48,8 @@
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
-    "test": "npm run build && node test.mjs"
+    "test": "npm run build && node test.mjs",
+    "prepare": "node build.mjs"
   },
   "publishConfig": {
     "access": "public"

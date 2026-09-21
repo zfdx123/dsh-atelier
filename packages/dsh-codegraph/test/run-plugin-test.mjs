@@ -24,10 +24,16 @@
 //
 // Environment overrides:
 //   CG_TEST_DIR=<dir>     fixture project location (default .test-fixture/)
-//   CG_EXECUTABLE=<path>  explicit codegraph executable
+//   CG_EXECUTABLE=<path>  explicit codegraph executable — handed to the plugin
+//                         as DSH_CODEGRAPH_EXECUTABLE, and used by the probe
 //   CG_KEEP_FIXTURE=1     leave the fixture (and its index) in place
 //   CG_PROFILE_NM=<dir>   test an installed profile's copy instead of this
 //                         checkout (dir is the profile's node_modules)
+//
+// The `codegraph` executable is NOT taken from PATH first: the plugin resolves
+// the declared `@colbymchenry/codegraph` dependency's shim in this package's
+// own `node_modules/.bin` (see lib/executable.js), and the suite verifies that
+// is what every CLI call runs.
 
 import { spawn } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -145,9 +151,69 @@ function runProcess(argv, options = {}) {
 }
 
 section('0) environment')
+// `@colbymchenry/codegraph` is a DECLARED dependency, so its `codegraph` shim
+// lands in `node_modules/.bin` — a directory that is not on PATH. The plugin
+// resolves the executable itself (lib/executable.js: package-local `.bin`
+// first, then PATH); this suite resolves it the same way, so "the suite passes"
+// means "the declared dependency is what actually ran", which is exactly the
+// install this change fixes. Nothing here needs a global install anymore.
+const { executableHint, findLocalExecutable, resolveCodegraphExecutable } = await import(
+  pathToFileURL(join(pluginRoot, 'lib', 'executable.js')).href
+)
+// CG_EXECUTABLE used to work through the stub `resolveExecutable` alone; with
+// local-first resolution the plugin only reaches that stub when no shim is
+// installed, so the harness hands the override over as the plugin's own.
+if (process.env.CG_EXECUTABLE) process.env.DSH_CODEGRAPH_EXECUTABLE = process.env.CG_EXECUTABLE
+
+let declaredRange
+try {
+  declaredRange = JSON.parse(readFileSync(join(pluginRoot, 'package.json'), 'utf8')).dependencies?.[
+    '@colbymchenry/codegraph'
+  ]
+} catch (error) {
+  bad('cannot read the plugin manifest', join(pluginRoot, 'package.json'), error.message)
+}
+if (declaredRange) ok('package.json declares @colbymchenry/codegraph as a dependency', declaredRange)
+else bad('package.json must declare @colbymchenry/codegraph in "dependencies"', join(pluginRoot, 'package.json'))
+
+const localShim = findLocalExecutable({ packageRoot: pluginRoot })
+if (localShim === null) {
+  bad('no codegraph shim installed with this package', 'looked in <package>/node_modules/.bin and every ancestor')
+} else {
+  ok('codegraph shim installed with the package', localShim)
+  // `.bin` sits inside the same node_modules as the dependency, so the shim's
+  // grandparent must carry the package itself — declared is not installed.
+  const dependencyDir = dirname(dirname(localShim))
+  const dependencyManifest = join(dependencyDir, '@colbymchenry', 'codegraph', 'package.json')
+  if (existsSync(dependencyManifest)) {
+    const installed = JSON.parse(readFileSync(dependencyManifest, 'utf8')).version
+    ok('@colbymchenry/codegraph is installed, not merely declared', `v${installed} in ${dependencyDir}`)
+  } else {
+    bad('the dependency is missing next to its shim', dependencyManifest)
+  }
+  const binDir = dirname(localShim)
+  const onPath = (process.env.PATH || '')
+    .split(delimiter)
+    .filter(Boolean)
+    .some((entry) => resolve(entry) === resolve(binDir))
+  if (onPath) ok('note: the package-local .bin happens to be on PATH here', binDir)
+  else ok('PATH does not contain the package-local .bin — local-first is what finds it', binDir)
+}
+
 let codegraphExe
 try {
-  codegraphExe = resolveExecutable('codegraph')
+  codegraphExe = await resolveCodegraphExecutable({
+    packageRoot: pluginRoot,
+    // PATH fallback, exactly as the plugin gets it from the subprocess service.
+    resolveExecutable: async (name) => resolveExecutable(name),
+  })
+  if (process.env.CG_EXECUTABLE) {
+    ok('CG_EXECUTABLE pins the executable under test', codegraphExe)
+  } else if (localShim === null || resolve(codegraphExe) !== resolve(localShim)) {
+    bad('resolution must pick the package-local shim, not a global install', `got ${codegraphExe}`)
+  } else {
+    ok('resolution picks the package-local shim over the global install', codegraphExe)
+  }
   const probe = await runProcess([codegraphExe, '--version'])
   if (probe.exitCode === 0 && /\d+\.\d+\.\d+/.test(probe.stdout)) {
     ok('codegraph CLI reachable', `${codegraphExe} \u2192 v${probe.stdout.trim()}`)
@@ -155,8 +221,9 @@ try {
     bad('codegraph --version produced no version', `exit=${probe.exitCode} ${probe.stderr.trim()}`)
   }
 } catch (error) {
-  bad('codegraph CLI not found on PATH', null, error.message)
-  console.log('\nInstall it first: npm i -g @colbymchenry/codegraph')
+  bad('codegraph CLI not found (no package-local shim, nothing on PATH)', null, error.message)
+  console.log('\nInstall the declared dependency first: npm install')
+  console.log('(or a global CLI, which the plugin also accepts: npm i -g @colbymchenry/codegraph)')
   process.exit(1)
 }
 
@@ -661,6 +728,24 @@ try {
   bad('codegraph_status with explicit path', null, error.message)
 }
 
+// === 6c) the CLI that ran is the declared dependency ========================
+section('6c) every CLI call ran the package-local shim, not a global install')
+{
+  // The stub `spawn` records argv for every subprocess call the plugin makes,
+  // so this is the plugin's OWN resolution — not the harness's — under test.
+  const spawned = spawnedArgv.filter((argv) => argv.length > 0)
+  const expected = process.env.CG_EXECUTABLE || localShim
+  if (spawned.length === 0) {
+    bad('no subprocess CLI call was recorded')
+  } else if (!expected) {
+    bad('nothing to compare against: no shim and no CG_EXECUTABLE')
+  } else {
+    const foreign = spawned.filter((argv) => resolve(argv[0]) !== resolve(expected))
+    if (foreign.length === 0) ok(`${spawned.length} recorded CLI call(s) all ran ${expected}`)
+    else bad('a CLI call did not run the expected executable', `${foreign.length}/${spawned.length}: ${foreign[0][0]}`)
+  }
+}
+
 // === 7) error paths =========================================================
 section('7) error paths')
 try {
@@ -696,86 +781,90 @@ section('7b) no executor mounted: apply() must not throw (lazy resolution)')
 }
 
 // === 7c) a process with NO exit code is not an exit-code failure ============
-section('7c) killed / timed-out runs report the real cause, never "exited null"')
-{
-  // `SubprocessOutcome.exitCode` is `number | null`: null means the child died
-  // from a signal, and `signal` carries which one (dsh-subprocess
-  // types.d.ts:107-112). `ShellRunResult.exitCode` is nullable for the same
-  // reason plus the executor's own timeout and the caller's abort, with the
-  // first cause classified in `timedOut` / `aborted` and `signal` left null for
-  // a preparation expiry (dsh-shell types.d.ts:106-132). Neither case HAS an
-  // exit code, so the plugin must classify the cause instead of printing one.
-  //
-  // The outcomes below are the documented service shapes, not invented ones;
-  // the assertion is on the message the tool actually throws, which is what the
-  // model reads.
-  const reader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
+// The stub services below are shared by 7c and 7d: `toolFor()` mounts the
+// plugin on a context that exposes exactly the services handed in, so a failure
+// path can be driven without an executor being present at all.
+//
+// `SubprocessOutcome.exitCode` is `number | null`: null means the child died
+// from a signal, and `signal` carries which one (dsh-subprocess
+// types.d.ts:107-112). `ShellRunResult.exitCode` is nullable for the same
+// reason plus the executor's own timeout and the caller's abort, with the
+// first cause classified in `timedOut` / `aborted` and `signal` left null for
+// a preparation expiry (dsh-shell types.d.ts:106-132). Neither case HAS an
+// exit code, so the plugin must classify the cause instead of printing one.
+//
+// The outcomes below are the documented service shapes, not invented ones;
+// the assertion is on the message the tool actually throws, which is what the
+// model reads.
+const reader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
 
-  function toolFor(services) {
-    const tools = []
-    const ctx = {
-      tools: {
-        register(tool) {
-          tools.push(tool)
-          return () => {}
-        },
-      },
-      systemPrompt: {
-        section() {
-          return () => {}
-        },
-      },
-      on() {
+function toolFor(services) {
+  const tools = []
+  const ctx = {
+    tools: {
+      register(tool) {
+        tools.push(tool)
         return () => {}
       },
-      get(name) {
-        return services[name]
-      },
-    }
-    plugin.apply(ctx, { guideSearch: false })
-    return tools.find((entry) => entry.name === 'codegraph_status')
-  }
-
-  async function messageFrom(tool) {
-    try {
-      await tool.execute({}, makeExec(FIXTURE_DIR))
-      return null
-    } catch (error) {
-      return error.message
-    }
-  }
-
-  const subprocessOutcome = (outcome, streams = {}) => ({
-    subprocess: {
-      async resolveExecutable() {
-        return process.execPath
-      },
-      spawn() {
-        return {
-          collected: { stdout: reader(streams.stdout || ''), stderr: reader(streams.stderr || '') },
-          done: Promise.resolve(outcome),
-        }
+    },
+    systemPrompt: {
+      section() {
+        return () => {}
       },
     },
-  })
-  const shellResult = (result) => ({
-    shell: {
-      resolve: (request) => ({ ...request }),
-      async run() {
-        return {
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          aborted: false,
-          timeoutMs: 120000,
-          stdout: { text: '' },
-          stderr: { text: '' },
-          ...result,
-        }
-      },
+    on() {
+      return () => {}
     },
-  })
+    get(name) {
+      return services[name]
+    },
+  }
+  plugin.apply(ctx, { guideSearch: false })
+  return tools.find((entry) => entry.name === 'codegraph_status')
+}
 
+async function messageFrom(tool) {
+  try {
+    await tool.execute({}, makeExec(FIXTURE_DIR))
+    return null
+  } catch (error) {
+    return error.message
+  }
+}
+
+const subprocessOutcome = (outcome, streams = {}) => ({
+  subprocess: {
+    async resolveExecutable() {
+      return process.execPath
+    },
+    spawn() {
+      return {
+        collected: { stdout: reader(streams.stdout || ''), stderr: reader(streams.stderr || '') },
+        done: Promise.resolve(outcome),
+      }
+    },
+  },
+})
+const shellResult = (result) => ({
+  shell: {
+    resolve: (request) => ({ ...request }),
+    async run() {
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        timeoutMs: 120000,
+        stdout: { text: '' },
+        stderr: { text: '' },
+        ...result,
+      }
+    },
+  },
+})
+
+section('7c) killed / timed-out runs report the real cause, never "exited null"')
+{
   const cases = [
     ['subprocess: killed by a signal', subprocessOutcome({ exitCode: null, signal: 'SIGKILL' }), /killed by SIGKILL/],
     [
@@ -802,10 +891,75 @@ section('7c) killed / timed-out runs report the real cause, never "exited null"'
     bad('non-zero exit message regressed', nonzero === null ? 'did not throw' : nonzero)
   }
 
-  // Shell exit 127 keeps its dedicated "not installed" hint.
+  // Shell exit 127 keeps its dedicated "not installed" hint — asserted against
+  // the resolver's own text, so the tool message cannot drift from the module.
   const missing = await messageFrom(toolFor(shellResult({ exitCode: 127 })))
-  if (missing && /not found on PATH/.test(missing)) ok('shell exit 127 still maps to the install hint')
-  else bad('exit 127 lost its install hint', missing === null ? 'did not throw' : missing)
+  if (missing === 'dsh-codegraph: ' + executableHint()) {
+    ok('shell exit 127 → the exact install hint from lib/executable.js')
+  } else {
+    bad('exit 127 lost its install hint', missing === null ? 'did not throw' : missing)
+  }
+}
+
+// === 7d) "cannot find codegraph anywhere" stays actionable ==================
+section('7d) missing executable: an explicit override and the auto path both explain themselves')
+{
+  // (a) DSH_CODEGRAPH_EXECUTABLE is explicit: a path that does not exist is an
+  // error naming the variable — never a silent fallback to a different binary.
+  const tool = toolFor(subprocessOutcome({ exitCode: 0 }))
+  const bogus = join(SANDBOX_DIR, 'no-such-dir', 'codegraph')
+  const previous = process.env.DSH_CODEGRAPH_EXECUTABLE
+  process.env.DSH_CODEGRAPH_EXECUTABLE = bogus
+  const overrideMessage = await messageFrom(tool)
+  if (previous === undefined) delete process.env.DSH_CODEGRAPH_EXECUTABLE
+  else process.env.DSH_CODEGRAPH_EXECUTABLE = previous
+  if (overrideMessage && overrideMessage.includes('DSH_CODEGRAPH_EXECUTABLE') && overrideMessage.includes(bogus)) {
+    ok('a missing override path is reported by name', overrideMessage.slice(0, 90))
+  } else {
+    bad('a missing override must name the override, not fall back', overrideMessage === null ? 'did not throw' : overrideMessage)
+  }
+
+  // (b) No override, no shim anywhere, nothing on PATH → the install hint, from
+  // the very function the plugin calls. A temp root cannot have a `.bin`, and
+  // it is also the root for (c), so both run against "no local shim".
+  const emptyRoot = mkdtempSync(join(tmpdir(), 'dsh-codegraph-nobin-'))
+  try {
+    if (findLocalExecutable({ packageRoot: emptyRoot }) !== null) {
+      bad('an empty root must not resolve a local shim', emptyRoot)
+    } else {
+      let thrown = null
+      try {
+        await resolveCodegraphExecutable({
+          packageRoot: emptyRoot,
+          resolveExecutable: async (name) => {
+            throw new Error(`not found on PATH: ${name}`)
+          },
+        })
+      } catch (error) {
+        thrown = error
+      }
+      if (thrown === null) bad('resolution must fail when nothing is installed')
+      else if (thrown.message === executableHint()) ok('no shim + nothing on PATH → the install hint', thrown.message.slice(0, 60) + '…')
+      else bad('the hint text drifted from lib/executable.js', thrown.message)
+    }
+
+    // (c) …but the fallback still exists: a machine with only a global install
+    // (no package-local shim, e.g. this plugin unpacked without its dependency)
+    // must keep working through the executor's PATH lookup.
+    const globalPath = join(tmpdir(), 'global-install', 'codegraph')
+    try {
+      const resolved = await resolveCodegraphExecutable({
+        packageRoot: emptyRoot,
+        resolveExecutable: async () => globalPath,
+      })
+      if (resolved === globalPath) ok('no shim → PATH is still consulted (a global install keeps working)')
+      else bad('the PATH fallback returned the wrong executable', resolved)
+    } catch (error) {
+      bad('the PATH fallback must be reachable', null, error.message)
+    }
+  } finally {
+    rmSync(emptyRoot, { recursive: true, force: true })
+  }
 }
 
 // === 8) prompt front-load ===================================================
