@@ -18,18 +18,24 @@ meta 包 `@zfdx123/dsh-atelier` 的 7 个依赖也必须写成 `^<同一个版�
 ## 首次发布（包在 npm 上还不存在时）
 
 Trusted Publisher 的配置入口在**包自己的设置页**，所以 7 个新包必须先存在一次。
-首次发布在**本地**做，不需要造 token：
+
+**为什么不能交给 CI 自动做**：registry 明确拒绝非交互发布，除非 token 勾了
+"Bypass two-factor authentication" —— 而那正是 npm 2027-01 要移除的能力
+（实测报错：`403 … Two-factor authentication or granular access token with bypass 2fa enabled is required to publish packages`）。
+所以首次发布在**你自己的终端**里做，npm 会交互式问你的 2FA 码，**不需要任何长期 token**：
 
 ```sh
-npm login                       # 交互式，带 2FA
-cd packages/dsh-memery
-npm publish --access public     # 一个一个来
+node scripts/publish-local.mjs dsh-memery     # 先拿一个试通
+node scripts/publish-local.mjs                # 其余全部（含入口包，自动排在最后）
 ```
 
-> **先拿一个包试通**（建议 `dsh-memery`），确认 npm 页面、`npm view`、以及
-> `dsh plugin --profile web add @zfdx123/dsh-memery` 三处都对，再批量发其余 6 个。
+脚本按「7 个插件 → 入口包」的顺序发（入口包依赖它们，必须先存在），
+任何一个失败就立即停止，不会出现"发了一半"的状态。
 
-发完 7 个之后，回到 npmjs.com 给每个包配好 Trusted Publisher，之后就再也不用 token 了。
+> 建议先只发 `dsh-memery`，确认三处都对再批量：
+> npm 包页面、`npm view @zfdx123/dsh-memery`、`dsh plugin --profile web add @zfdx123/dsh-memery`。
+
+发完 7 个之后，回到 npmjs.com 给每个包配好 Trusted Publisher，之后就再也不用人工介入。
 
 ## 日常发布（打 tag 自动发）
 

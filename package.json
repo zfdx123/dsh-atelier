@@ -18,7 +18,8 @@
     "install:all": "node scripts/run-all.mjs install",
     "test": "node scripts/run-all.mjs test",
     "format": "prettier --write \"packages/**/*.{ts,tsx,mts,cts,js,mjs,cjs,jsx,css}\"",
-    "format:check": "prettier --check \"packages/**/*.{ts,tsx,mts,cts,js,mjs,cjs,jsx,css}\""
+    "format:check": "prettier --check \"packages/**/*.{ts,tsx,mts,cts,js,mjs,cjs,jsx,css}\"",
+    "publish:local": "node scripts/publish-local.mjs"
   },
   "devDependencies": {
     "prettier": "^3.9.8"
