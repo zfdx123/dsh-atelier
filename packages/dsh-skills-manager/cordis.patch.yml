@@ -1,0 +1,13 @@
+# dsh-skills-manager bundle patch：在组合树中插入技能管理器行。
+#
+# 宿主侧注册 /api/skills/manager（带回环来源护栏）与模型工具 skill_manager；
+# 客户端在设置页注册「技能管理」整页，并在侧栏脚加一个「技能」浮层入口。
+#
+# 用户可以在自己的 profile cordis.patch.yml 里按 id 覆盖本行
+# （例如禁用：- id: skill-manager  disabled: true）。
+# name 必须是 npm 包名，且与 package.json 的 name、client.js 里
+# __ModuleLoader__.load({ id }) 三者完全一致——宿主按这个 id 装载客户端 bundle，
+# 不一致会在挂载阶段报 `loaded without registering "<id>"`。
+- insert:
+    - id: skill-manager
+      name: '@zfdx123/dsh-skills-manager'

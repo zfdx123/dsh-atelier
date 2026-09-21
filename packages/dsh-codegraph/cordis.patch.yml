@@ -1,0 +1,19 @@
+# dsh-codegraph bundle patch
+#
+# 本包作为 profile 依赖装入（本地路径或 link:）时，dsh 的 plugin 管理器依据
+# package.json 的 `dsh.bundle.patch` 识别本层，并由这条 insert 把本包的 node half
+# （lib/index.js）插入 host cordis 组合。装完不需要手工改依赖或 patch。
+#
+# `name` 必须与 package.json 的 `name` 完全一致——加载器按这个包名解析并装载这一行。
+# 包名带 scope，**YAML 里必须加引号**：以 `@` 开头的裸标量是 YAML 保留指示符，
+# 不加引号会解析失败。
+#
+# `id` 是覆盖句柄（不是包名）：profile 自己的 cordis.patch.yml 可以按 id 禁用或改配置
+# （`- id: dsh-codegraph` + `disabled: true`，或给 `config:` 传
+# guideSearch/surface/frontload）。id 保持 `dsh-codegraph` 不变，已存在的用户覆盖继续有效。
+#
+# The node half registers the 13 model-visible `codegraph_*` tools (4 on the
+# default core surface). There is no browser/client half.
+- insert:
+    - id: dsh-codegraph
+      name: '@zfdx123/dsh-codegraph'

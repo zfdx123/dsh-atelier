@@ -1,0 +1,61 @@
+# settings.yaml 中 `mcp` 命名空间的示例配置。
+# 可以把它合并进 $DSH_HOME/settings.yaml，再从「设置 → MCP 服务器」调整；
+# 也可以直接在设置页里新增（这里主要是展示文件里的结构）。
+
+mcp:
+  servers:
+    # stdio 示例：本地命令（把 command/args 换成你的服务器启动方式）
+    - serverName: my-stdio-server
+      enabled: true
+      transport: stdio
+      command: npx
+      args:
+        - '-y'
+        - '@some/mcp-server'
+      env:
+        SOME_TOKEN: 'env:SOME_TOKEN'   # env:NAME / cred:NAME 引用，密钥不入盘
+      cwd: ''
+      url: ''
+      headers: {}
+      toolCallTimeoutMs: 60000
+      failOnStartupError: false
+      reconnectEnabled: true
+      reconnectMaxAttempts: 10
+
+    # streamable-http 示例：远程 URL（enabled: false 表示默认关闭）
+    - serverName: my-http-server
+      enabled: false
+      transport: streamable-http
+      command: ''
+      args: []
+      env: {}
+      cwd: ''
+      url: http://localhost:3000/mcp
+      headers:
+        Authorization: 'cred:MCP_BEARER'
+      toolCallTimeoutMs: 60000
+      failOnStartupError: false
+      reconnectEnabled: true
+      reconnectMaxAttempts: 10
+      tlsInsecure: false
+      tlsCaFile: ''
+
+    # 内网自签名 HTTPS 示例：证书不受信任时二选一（推荐 tlsCaFile）
+    - serverName: intranet-syslog
+      enabled: false
+      transport: streamable-http
+      command: ''
+      args: []
+      env: {}
+      cwd: ''
+      url: https://10.170.17.55:8091/mcp
+      headers:
+        X-API-Token: 'env:SYSLOG_TOKEN'
+      toolCallTimeoutMs: 60000
+      # 方案一（推荐）：用服务器证书/其 CA 的 PEM 严格校验
+      tlsCaFile: C:\certs\syslog-cert.pem
+      # 方案二（应急）：只对这台服务器跳过证书校验
+      tlsInsecure: false
+      # 内网服务常掉线：把重连开大一点，避免 10 次后彻底放弃
+      reconnectEnabled: true
+      reconnectMaxAttempts: 30

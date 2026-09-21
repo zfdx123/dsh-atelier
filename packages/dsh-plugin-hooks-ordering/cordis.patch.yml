@@ -1,0 +1,38 @@
+# The dsh-plugin-hooks-ordering bundle patch: mount the waterfall and serial
+# ordering services and take control of the dsh hooks that multiple independent
+# packages contribute to (agent/pre-step, tools/post-execute,
+# system-prompt/assemble, agent/turn-stopping, …).
+#
+# `llm/stream` and `session-telemetry/record` are deliberately NOT in the
+# default set: dsh dispatches both without awaiting, so a participant would turn
+# their return value into a Promise (a broken stream / a silently corrupted
+# telemetry record). They are listed in `syncReturnHooks`, which makes
+# `register()` refuse them with an explicit error; `control()` stays allowed.
+#
+# Apply this layer LAST — after the native/contributing plugins load. The
+# plugin brackets each hook with a single PREPENDED listener; prepending it
+# after the native listeners are registered makes its next() enclose the whole
+# native chain. Mounted earlier, a native plugin that prepends later would land
+# ahead of the bracket and escape ordering (overwrite it). In a dsh profile the
+# user cordis.patch.yml is applied after every bundle layer, so inserting the
+# row there loads it last by construction.
+# Controlling a hook with no registered participants is a transparent
+# pass-through, so this row changes nothing until a plugin registers with
+# before/after.
+#
+# Row order carries no load semantics (activation is service-availability
+# driven); ordering is enforced by the coordinator, not by position. Override
+# `hooks`/`serialHooks` to narrow the controlled set, or set `log` to write the
+# constraint DAG (JSON) on every registration change.
+
+- insert:
+    - id: hooks-ordering
+      # The BARE package name, not the `/dsh` subpath. dsh maps a row's name back
+      # to a package to find the browser half (`dsh.client`); a subpath specifier
+      # is not a package it can resolve, so the settings page would never appear.
+      name: '@zfdx123/dsh-plugin-hooks-ordering'
+      config:
+        # hooks: ['agent/pre-step', 'tools/post-execute']
+        # serialHooks: ['agent/turn-stopping']
+        # syncReturnHooks: ['llm/stream', 'session-telemetry/record']
+        # log: './hooks-ordering-dag.json'

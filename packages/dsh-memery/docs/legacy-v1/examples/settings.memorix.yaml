@@ -1,0 +1,27 @@
+# dsh-memery 的 memorix MCP 服务器配置示例。
+#
+# 合并进 $DSH_HOME/settings.yaml 的 `mcp.servers` 列表即可（注意 YAML 缩进：
+# 这是列表项，不是顶层键）。合并后**需重启 dsh 进程**才会被 mcp-manager 读入；
+# 之后在「设置 → MCP 服务器」里增删改都热生效。
+#
+# 前置：memorix 控制面常驻，且 /health 返回 ok：
+#   npm install -g memorix
+#   memorix background start
+#   curl http://127.0.0.1:3211/health
+#
+# 生效后模型会拿到 mcp__memorix__* 形式的工具。
+- serverName: memorix
+  enabled: true
+  transport: streamable-http
+  command: ""
+  args: []
+  env: {}
+  cwd: ""
+  url: http://127.0.0.1:3211/mcp
+  headers: {}
+  toolCallTimeoutMs: 60000
+  failOnStartupError: false
+  tlsInsecure: false
+  tlsCaFile: ""
+  reconnectEnabled: true
+  reconnectMaxAttempts: 10

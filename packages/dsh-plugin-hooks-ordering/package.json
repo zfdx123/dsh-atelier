@@ -1,0 +1,117 @@
+{
+  "name": "@zfdx123/dsh-plugin-hooks-ordering",
+  "version": "1.0.0",
+  "description": "钩子排序：为 Cordis 的 waterfall / serial 钩子提供确定性的 before/after 排序，让互相独立的插件能声明彼此的先后关系（拓扑排序、环检测、可配置控制集与设置页）。",
+  "keywords": [
+    "cordis",
+    "plugin",
+    "hooks",
+    "ordering",
+    "waterfall",
+    "serial",
+    "deepseek-harness",
+    "dsh",
+    "topological-sort"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/zfdx123/dsh-atelier/tree/main/packages/dsh-plugin-hooks-ordering#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zfdx123/dsh-atelier.git",
+    "directory": "packages/dsh-plugin-hooks-ordering"
+  },
+  "bugs": {
+    "url": "https://github.com/zfdx123/dsh-atelier/issues"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./topo-sort": {
+      "types": "./lib/topo-sort.d.ts",
+      "default": "./lib/topo-sort.js"
+    },
+    "./waterfall": {
+      "types": "./lib/waterfall.d.ts",
+      "default": "./lib/waterfall.js"
+    },
+    "./dag": {
+      "types": "./lib/dag.d.ts",
+      "default": "./lib/dag.js"
+    },
+    "./serial": {
+      "types": "./lib/serial.d.ts",
+      "default": "./lib/serial.js"
+    },
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "^0.1.6-alpha.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-settings": "^0.1.6-alpha.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-settings": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@types/node": "^22.20.1",
+    "@vitest/coverage-v8": "^3.2.4",
+    "oxlint": "^1.0.0",
+    "tsdown": "^0.15.6",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src test client.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepare": "tsdown",
+    "prepublishOnly": "tsdown"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "packageManager": "pnpm@10.10.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

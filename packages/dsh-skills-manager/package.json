@@ -1,0 +1,72 @@
+{
+  "name": "@zfdx123/dsh-skills-manager",
+  "version": "1.0.0",
+  "description": "DSH 技能管理器：诊断、新建、编辑、开关、搬运磁盘上的技能（SKILL.md），补上官方 provider 静默跳过坏文件的那半边，并给模型一个 skill_manager 工具",
+  "license": "MIT",
+  "homepage": "https://github.com/zfdx123/dsh-atelier/tree/main/packages/dsh-skills-manager#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zfdx123/dsh-atelier.git",
+    "directory": "packages/dsh-skills-manager"
+  },
+  "bugs": {
+    "url": "https://github.com/zfdx123/dsh-atelier/issues"
+  },
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "lib/",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22",
+    "dsh": "^0.1.6-alpha.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-settings": "^0.1.6-alpha.1",
+    "@deepseek-ai/dsh-tools": "^0.1.6-alpha.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-settings": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-tools": "^0.1.6-alpha.1"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  }
+}

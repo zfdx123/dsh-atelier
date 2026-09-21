@@ -1,0 +1,26 @@
+{
+  "name": "dsh-atelier",
+  "private": true,
+  "description": "DSH 插件工坊：7 个可独立安装的 DeepSeek Harness 插件。",
+  "license": "MIT",
+  "author": "zfdx123 <2915441170@qq.com>",
+  "homepage": "https://github.com/zfdx123/dsh-atelier#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zfdx123/dsh-atelier.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "check": "node scripts/release-check.mjs",
+    "install:all": "node scripts/run-all.mjs install",
+    "test": "node scripts/run-all.mjs test",
+    "format": "prettier --write \"packages/**/*.{ts,tsx,mts,cts,js,mjs,cjs,jsx,css}\"",
+    "format:check": "prettier --check \"packages/**/*.{ts,tsx,mts,cts,js,mjs,cjs,jsx,css}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.9.8"
+  }
+}

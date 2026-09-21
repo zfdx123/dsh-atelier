@@ -1,0 +1,58 @@
+{
+  "name": "@zfdx123/dsh-codegraph",
+  "version": "1.0.0",
+  "description": "DSH 代码知识图谱：把 codegraph CLI 包成原生 codegraph_* 工具（core 面 status/init/sync/explore；full 面再加 query/node/files/callers/callees/impact/affected/index/uninit），并用提示前置钩子把结构化上下文推进结构化提问，让代理无需 grep 即可建立、维护、查询预索引的代码图谱。",
+  "license": "MIT",
+  "author": "zfdx123 <2915441170@qq.com>",
+  "homepage": "https://github.com/zfdx123/dsh-atelier/tree/main/packages/dsh-codegraph#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zfdx123/dsh-atelier.git",
+    "directory": "packages/dsh-codegraph"
+  },
+  "bugs": {
+    "url": "https://github.com/zfdx123/dsh-atelier/issues"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "engines": {
+    "node": ">=22",
+    "dsh": "^0.1.6-alpha.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-llm": "^0.1.6-alpha.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.6-alpha.1",
+    "@deepseek-ai/dsh-tools": "^0.1.6-alpha.1",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-system-prompt": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-llm": "^0.1.6-alpha.1",
+    "@deepseek-ai/dsh-tools": "^0.1.6-alpha.1",
+    "@deepseek-ai/schemastery": "3.18.2"
+  },
+  "scripts": {
+    "test": "node test/run-plugin-test.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

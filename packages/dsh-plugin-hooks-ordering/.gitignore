@@ -1,0 +1,10 @@
+node_modules/
+.pnpm-store/
+lib/
+coverage/
+*.tgz
+*.log
+.DS_Store
+.vitest/
+.codegraph/
+DSH兼容性检查报告.md

@@ -1,0 +1,10 @@
+node_modules/
+test-built/
+lib/
+!docs/legacy-v1/lib/
+*.log
+.dsh-memery-*
+
+# 本机索引/记忆数据：不是源码
+.codegraph/
+.dsh-memery/

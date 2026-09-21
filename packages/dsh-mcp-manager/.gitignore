@@ -1,0 +1,13 @@
+node_modules/
+*.log
+.DS_Store
+dist/
+.idea/
+
+# 审计/兼容性检查的报告与证据产物：本地交付物，不进 git
+/审计报告/
+/compat-artifacts/
+/兼容性检查与修复报告-*.md
+
+# codegraph 本地代码索引（生成物，非源码）
+/.codegraph/

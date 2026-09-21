@@ -1,0 +1,8 @@
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+*.md
+.dsh-memery/
+coverage/
+审计报告/
+compat-artifacts/

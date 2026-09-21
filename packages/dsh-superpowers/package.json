@@ -1,0 +1,68 @@
+{
+  "name": "@zfdx123/dsh-superpowers",
+  "version": "1.0.0",
+  "description": "Superpowers（移植自 obra/superpowers）：把整套软件开发方法论技能与会话引导语作为 dsh 插件提供，技能在运行时注册，首轮对话自动注入引导。",
+  "license": "MIT",
+  "author": "zfdx123",
+  "homepage": "https://github.com/zfdx123/dsh-atelier/tree/main/packages/dsh-superpowers#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zfdx123/dsh-atelier.git",
+    "directory": "packages/dsh-superpowers"
+  },
+  "bugs": {
+    "url": "https://github.com/zfdx123/dsh-atelier/issues"
+  },
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "skills/**",
+    "test/**",
+    "README.md",
+    "README.zh.md",
+    "LICENSE",
+    "LICENSE.superpowers"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "^0.1.6-alpha.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-skill": "^0.1.6-alpha.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.6-alpha.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-skill": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-system-prompt": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "superpowers": {
+    "upstreamVersion": "6.3.0",
+    "upstreamCommit": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+    "upstreamRepository": "https://github.com/obra/superpowers"
+  }
+}

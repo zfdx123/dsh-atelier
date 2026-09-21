@@ -1,0 +1,21 @@
+# 依赖：本仓库用 pnpm（锁文件是 pnpm-lock.yaml）。
+# 绝不要把 node_modules 提交进来——它是安装产物，且本项目通过 profile 的
+# link: 依赖被 DSH 加载，仓库里只需要源码。
+node_modules/
+
+# npm 的锁文件不参与本仓库：本项目用 pnpm，且插件被 profile 以 link: 方式安装。
+# 保留两份锁文件会让下一个人装出不一致的依赖树。
+package-lock.json
+
+# 编辑器与系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 日志与临时产物
+*.log
+*.tmp
+
+# 代码索引：CodeGraph 在本地建的符号/调用图谱，属机器产物，不进仓库
+.codegraph/

@@ -1,0 +1,71 @@
+# Verify every package, then publish them all on a version tag.
+#
+# Publishing uses OIDC (npm trusted publishing): no long-lived token exists in
+# this repository, and each package carries a provenance attestation. Configure
+# the trusted publisher for each package on npmjs.com first — see RELEASING.md.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: npm 11.5.1+ (OIDC publishing)
+        run: npm install -g npm@latest
+      - run: npm install
+      - run: npm run check
+      - run: npm run install:all
+      - run: npm test
+
+  publish:
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - name: npm 11.5.1+ (OIDC publishing)
+        run: npm install -g npm@latest
+      - name: tag matches every package version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          node -e '
+            const fs = require("node:fs");
+            const tag = process.argv[1];
+            const dirs = fs.readdirSync("packages");
+            const bad = dirs.filter((d) => {
+              const j = JSON.parse(fs.readFileSync(`packages/${d}/package.json`, "utf8"));
+              return j.version !== tag;
+            });
+            if (bad.length > 0) {
+              console.error(`tag v${tag} does not match: ${bad.join(", ")}`);
+              process.exit(1);
+            }
+            console.log(`tag v${tag} matches all ${dirs.length} packages`);
+          ' "$tag"
+      - name: publish each package
+        run: |
+          set -euo pipefail
+          for dir in packages/*/; do
+            echo "::group::publish $dir"
+            (cd "$dir" && npm publish --access public --provenance)
+            echo "::endgroup::"
+          done

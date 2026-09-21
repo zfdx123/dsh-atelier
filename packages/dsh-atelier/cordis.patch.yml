@@ -1,0 +1,11 @@
+# Intentionally empty.
+#
+# This package is a pure aggregator: installing it pulls the seven plugins in as
+# dependencies, and the launcher's reconcile() step adds every newly installed
+# dependency that declares `dsh.bundle` to the profile's bundle list — each
+# plugin therefore contributes its own cordis.patch.yml row on its own.
+#
+# Declaring a patch here that inserted those same rows would register every
+# plugin twice. The file exists only so this package is recognised as a bundle
+# instead of being reported as "installed as a plain dependency".
+[]

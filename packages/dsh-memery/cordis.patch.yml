@@ -1,0 +1,11 @@
+# dsh-memery bundle patch：在组合树中插入记忆插件行。
+#
+# 客户端 bundle 由宿主按 **包名** 装载：name 必须与 package.json 的 name、
+# 以及 lib/client.js 里 `__ModuleLoader__.load({ id })` 三者完全一致——
+# 不一致会在挂载阶段报 `loaded without registering "<id>"`。
+#
+# 用户可以在自己的 profile cordis.patch.yml 里按 id 覆盖本行
+# （例如禁用：- id: dsh-memery  disabled: true）。
+- insert:
+    - id: dsh-memery
+      name: '@zfdx123/dsh-memery'

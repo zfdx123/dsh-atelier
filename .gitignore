@@ -1,0 +1,11 @@
+node_modules/
+.dsh-memery/
+.codegraph/
+coverage/
+dist/
+*.tgz
+*.log
+审计报告/
+compat-artifacts/
+.DS_Store
+Thumbs.db

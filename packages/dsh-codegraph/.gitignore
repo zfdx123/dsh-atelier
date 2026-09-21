@@ -1,0 +1,12 @@
+node_modules/
+.codegraph/
+.test-fixture/
+.test-unindexed/
+.test-capture/
+.npm-cache/
+*.log
+.DS_Store
+
+# Audit reports are session deliverables, not part of the package:
+# they describe the code at a point in time and would rot in-tree.
+审计报告/
