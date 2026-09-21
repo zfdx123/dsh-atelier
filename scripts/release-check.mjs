@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const packagesDir = path.join(root, 'packages')
 /** The plugins release in lockstep. */
-const PLUGIN_VERSION = '1.0.0'
+const PLUGIN_VERSION = '1.0.1'
 /**
  * The aggregator versions on its own: it only carries the bundle composition, so
  * changing which plugins are in the set must not force a republish of plugins
@@ -28,6 +28,23 @@ const EXCLUDED = new Set(['dsh-opencode-go'])
 const problems = []
 const notes = []
 const fail = (pkg, message) => problems.push(`${pkg}: ${message}`)
+
+/**
+ * Does a `^a.b.c` range admit `A.B.C`? True when the majors match and the range's
+ * minor.patch is at or below the version's. Deliberately narrow — the aggregator's
+ * ranges are written as carets over the plugins' major, nothing else.
+ * @param {string} range a caret range such as `^1.0.0`
+ * @param {string} version a concrete version such as `1.0.1`
+ * @returns {boolean}
+ */
+function caretAdmits(range, version) {
+  const m = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range)
+  if (m === null) return false
+  const [rangeMajor, rangeMinor, rangePatch] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const [major, minor, patch] = version.split('.').map(Number)
+  if (rangeMajor !== major) return false
+  return rangeMinor < minor || (rangeMinor === minor && rangePatch <= patch)
+}
 
 const dirs = fs
   .readdirSync(packagesDir, { withFileTypes: true })
@@ -105,7 +122,12 @@ if (meta === undefined) {
     fail(AGGREGATOR, `dependencies are ${actual.join(', ')} but the packages are ${expected.join(', ')}`)
   }
   for (const [dep, range] of Object.entries(deps)) {
-    if (range !== `^${PLUGIN_VERSION}`) fail(AGGREGATOR, `dependency ${dep} is "${range}", expected "^${PLUGIN_VERSION}"`)
+    // The aggregator's range has to ADMIT the plugins' current version, not equal
+    // it: `^1.0.0` covers 1.0.1, so a plugin patch bump must not force a new
+    // aggregator release. (It is a caret range over the same major.)
+    if (!caretAdmits(range, PLUGIN_VERSION)) {
+      fail(AGGREGATOR, `dependency ${dep} is "${range}", which does not admit ${PLUGIN_VERSION}`)
+    }
   }
   // Without a patch the launcher reports the aggregator as a plain dependency and
   // NOTHING it pulled in gets activated: reconcile() only walks the profile's own

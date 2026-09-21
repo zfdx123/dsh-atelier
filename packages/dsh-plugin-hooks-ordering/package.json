@@ -1,6 +1,6 @@
 {
   "name": "@zfdx123/dsh-plugin-hooks-ordering",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "钩子排序：为 Cordis 的 waterfall / serial 钩子提供确定性的 before/after 排序，让互相独立的插件能声明彼此的先后关系（拓扑排序、环检测、可配置控制集与设置页）。",
   "keywords": [
     "cordis",
