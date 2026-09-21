@@ -39,6 +39,32 @@ if (targets.length === 0) {
   process.exit(2)
 }
 
+// Fail before packing anything if this machine has no credential for the public
+// registry. A mirror-only ~/.npmrc (registry=…npmmirror.com) is the common case:
+// installs work, publishing has nowhere to authenticate against.
+const REGISTRY = 'https://registry.npmjs.org/'
+try {
+  execFileSync('npm', ['whoami', '--registry', REGISTRY], { stdio: 'pipe', shell: process.platform === 'win32' })
+} catch {
+  const current = execFileSync('npm', ['config', 'get', 'registry'], { encoding: 'utf8', shell: process.platform === 'win32' }).trim()
+  console.error(
+    [
+      `not logged in to ${REGISTRY}`,
+      '',
+      `  your default registry is ${current}`,
+      '  installs through it are fine, but publishing must authenticate against the public registry:',
+      '',
+      `      npm login --registry=${REGISTRY}`,
+      '',
+      '  add --auth-type=web to log in through the browser instead of typing a password.',
+      '  A granular token only works here if it has "Bypass two-factor authentication" enabled,',
+      '  which npm is retiring in January 2027 — logging in is the durable answer.',
+      '',
+    ].join('\n'),
+  )
+  process.exit(2)
+}
+
 for (const name of targets) {
   const dir = path.join(packagesDir, name)
   const j = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
