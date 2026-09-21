@@ -59,6 +59,15 @@ jobs:
           registry-url: https://registry.npmjs.org
       - name: npm 11.5.1+ (OIDC publishing)
         run: npm install -g npm@latest
+      - name: build toolchain
+        run: |
+          # `npm stage publish` runs each package's prepare/prepublishOnly, which
+          # BUILDS lib/ — esbuild for dsh-memery, tsdown for
+          # dsh-plugin-hooks-ordering. Those devDependencies have to exist in THIS
+          # job: the verify job's install does not carry over between jobs.
+          npm install -g pnpm@10
+          npm install
+          npm run install:all
       - name: what this tag would release
         run: |
           set -euo pipefail
