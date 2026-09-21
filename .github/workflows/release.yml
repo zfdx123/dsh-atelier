@@ -89,7 +89,18 @@ jobs:
               continue
             fi
             echo "::group::stage $name@$version"
-            (cd "$dir" && npm stage publish --access public --provenance)
+            # A version already sitting in the staging area is invisible to
+            # `npm view`, so re-running this workflow (or re-tagging) would hit
+            # E409 "Cannot stage previously published version". A release job has
+            # to be idempotent: treat that as "already staged", not as a failure.
+            if out=$( (cd "$dir" && npm stage publish --access public --provenance) 2>&1 ); then
+              printf '%s\n' "$out"
+            elif printf '%s' "$out" | grep -qE 'E409|Cannot stage previously published'; then
+              echo "skip $name@$version — already staged, awaiting approval"
+            else
+              printf '%s\n' "$out"
+              exit 1
+            fi
             echo "::endgroup::"
           done
           echo "::notice::staged versions await 2FA approval at https://www.npmjs.com/settings/zfdx123/packages"
