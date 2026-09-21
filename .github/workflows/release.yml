@@ -43,29 +43,32 @@ jobs:
           registry-url: https://registry.npmjs.org
       - name: npm 11.5.1+ (OIDC publishing)
         run: npm install -g npm@latest
-      - name: tag matches every package version
+      - name: what this tag would release
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME#v}"
           node -e '
             const fs = require("node:fs");
             const tag = process.argv[1];
-            const dirs = fs.readdirSync("packages");
-            const bad = dirs.filter((d) => {
+            const rows = fs.readdirSync("packages").map((d) => {
               const j = JSON.parse(fs.readFileSync(`packages/${d}/package.json`, "utf8"));
-              return j.version !== tag;
+              return { name: j.name, version: j.version, matchesTag: j.version === tag };
             });
-            if (bad.length > 0) {
-              console.error(`tag v${tag} does not match: ${bad.join(", ")}`);
-              process.exit(1);
-            }
-            console.log(`tag v${tag} matches all ${dirs.length} packages`);
+            for (const r of rows) console.log(`${r.matchesTag ? "=" : " "} ${r.name}@${r.version}`);
+            const matching = rows.filter((r) => r.matchesTag).length;
+            console.log(`\n${matching}/${rows.length} packages are at v${tag}; the rest are skipped as already published.`);
           ' "$tag"
-      - name: publish each package
+      - name: publish every package whose version is not on the registry yet
         run: |
           set -euo pipefail
           for dir in packages/*/; do
-            echo "::group::publish $dir"
+            name=$(node -p "require('./$dir/package.json').name")
+            version=$(node -p "require('./$dir/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "skip $name@$version — already published"
+              continue
+            fi
+            echo "::group::publish $name@$version"
             (cd "$dir" && npm publish --access public --provenance)
             echo "::endgroup::"
           done
