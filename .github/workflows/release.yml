@@ -58,9 +58,13 @@ jobs:
             const matching = rows.filter((r) => r.matchesTag).length;
             console.log(`\n${matching}/${rows.length} packages are at v${tag}; the rest are skipped as already published.`);
           ' "$tag"
-      - name: publish every package whose version is not on the registry yet
+      - name: stage every package whose version is not on the registry yet
         run: |
           set -euo pipefail
+          # Trusted Publisher is configured WITHOUT "Allow npm publish": CI may only
+          # stage, and a maintainer approves each version with 2FA on npmjs.com.
+          # That keeps a compromised workflow from pushing a release by itself.
+          # npm CLI >= 11.15 is required for `npm stage publish`.
           for dir in packages/*/; do
             name=$(node -p "require('./$dir/package.json').name")
             version=$(node -p "require('./$dir/package.json').version")
@@ -68,7 +72,8 @@ jobs:
               echo "skip $name@$version — already published"
               continue
             fi
-            echo "::group::publish $name@$version"
-            (cd "$dir" && npm publish --access public --provenance)
+            echo "::group::stage $name@$version"
+            (cd "$dir" && npm stage publish --access public --provenance)
             echo "::endgroup::"
           done
+          echo "::notice::staged versions await 2FA approval at https://www.npmjs.com/settings/zfdx123/packages"

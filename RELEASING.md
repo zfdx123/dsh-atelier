@@ -35,21 +35,45 @@ node scripts/publish-local.mjs                # 其余全部（含入口包，�
 > 建议先只发 `dsh-memery`，确认三处都对再批量：
 > npm 包页面、`npm view @zfdx123/dsh-memery`、`dsh plugin --profile web add @zfdx123/dsh-memery`。
 
-发完 7 个之后，回到 npmjs.com 给每个包配好 Trusted Publisher，之后就再也不用人工介入。
+发完 7 个之后，回到 npmjs.com 给每个包配好 Trusted Publisher（见下），之后就再也不用人工介入。
 
-## 日常发布（打 tag 自动发）
+## 配 Trusted Publisher（8 个包各一次）
+
+包页面 → **Settings → Trusted Publisher → GitHub Actions**：
+
+| 字段 | 填 |
+|---|---|
+| Publisher | `GitHub Actions` |
+| Label | 随意，例如 `dsh-atelier` |
+| Organization or user | `zfdx123` |
+| Repository | `dsh-atelier` |
+| Workflow filename | `release.yml`（**只写文件名**，不带路径） |
+| Environment name | **留空** |
+| **Allowed actions** | ☐ **不勾 "Allow npm publish"** |
+
+**为什么留空那个勾**：勾上等于允许 CI 直接把版本推进公共 registry；不勾则 CI 只能
+`npm stage publish` **暂存**，必须由维护者用 2FA 在网页上批准才真正发布。npm 明确推荐不勾——
+这样即使工作流被攻破或混进恶意提交，也发不出去。代价是每次发版点一次批准。
+
+> ⚠️ 页面提示 "Cannot be changed later" 是真的：这些值建好即锁死，要改只能删掉重建。
+> 文件名 `release.yml` 一个字母都不能错。
+
+## 日常发布（打 tag → 暂存 → 你批准）
 
 ```sh
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 `.github/workflows/release.yml` 会：
 
 1. `verify` 作业：`npm run check` → 逐包安装 → 逐包测试；
-2. `publish` 作业（仅在 tag 上）：逐包 `npm publish --access public --provenance`。
+2. `publish` 作业（仅在 tag 上）：对每个「registry 上还没有这个版本」的包执行
+   **`npm stage publish --access public --provenance`**；
+3. **你去 npmjs.com 用 2FA 批准**（暂存区里会列出来）。
 
-发布走 **OIDC（trusted publishing）**，工作流里没有任何长期密钥。
+已发布的版本会被跳过，所以重复打 tag 或只 bump 一个包都是安全的。
+工作流里没有任何长期密钥，暂存与批准都带 provenance 签名。
 
 ## 为什么不放 npm token
 
