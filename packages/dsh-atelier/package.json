@@ -1,6 +1,6 @@
 {
   "name": "@zfdx123/dsh-atelier",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "DSH 插件工坊：一条命令装齐 7 个插件——MCP 服务器管理器、技能管理器、跨会话记忆、钩子排序、会话清理、代码知识图谱、Superpowers 方法论。",
   "keywords": [
     "deepseek-harness",

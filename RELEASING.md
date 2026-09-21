@@ -68,13 +68,27 @@ npm 已公告：**2027 年 1 月起移除 bypass-2FA token 的直接发布能力
 | Allowed IP ranges | **留空** | GitHub Actions 出口 IP 是动态的，填了就发不出去 |
 | Expiration | 最短 | 用完即删 |
 
-## meta 包的 patch 为什么是空的
+## 入口包的 patch 为什么必须显式插入 7 行
 
-`packages/dsh-atelier/cordis.patch.yml` 只有一个 `[]`。原因在启动器的 `reconcile()`：
-它会把**每一个新装进来、且声明了 `dsh.bundle` 的依赖**逐个加进 profile 的 bundle 列表。
-装 meta 包时 7 个插件作为依赖一起进来，各自带自己的 patch，已经各自注册过了；
-meta 再插一遍就是每个插件注册两次。空 patch 的唯一作用是让 meta 被当成 bundle 而不是
-被报成 "installed as a plain dependency"。
+启动器的 `reconcile()` 只遍历 **profile 清单的直接依赖**
+（`dsh-plugin-manager/lib/index.js:44` 的 `Object.keys(after.dependencies)`）。
+装入口包时，7 个插件是它的**传递依赖**，不在那个列表里，所以**不会被自动激活**。
+
+> 实测教训：入口包最初用的是空 patch，结果是「装上了，但 `--dump-config` 里一行都没有」——
+> 代码到位、组合树为空。这正是端到端测试（装进一个隔离 profile 再 dump）才能发现的问题，
+> `npm view` 和发布日志都看不出来。
+
+所以 `packages/dsh-atelier/cordis.patch.yml` 必须逐行 insert 那 7 个插件，
+`release-check` 会强制：缺 patch、patch 文件不存在、或没把 7 个插件全插入 → 直接失败。
+
+**不要同时装入口包和它里面的单个插件**：那样同一个 id 会被插两次。
+要全套装入口包，要单个装那个包，二选一。
+
+## 版本规则（补充）
+
+- **7 个插件**共用一个版本号，lockstep。
+- **入口包独立升版**：它只承载组合清单，改动"这套里有哪些插件"不该逼你重发 7 个没变的包。
+  它的依赖范围必须写成 `^<插件版本>`，`release-check` 会核对。
 
 ## 回滚
 

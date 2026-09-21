@@ -18,7 +18,9 @@ dsh plugin --profile web add @zfdx123/dsh-atelier
 
 只想装其中一个？直接装那个包即可，不必经过本包。
 
-本包自身**不注册任何东西**（它的 `cordis.patch.yml` 是空的，原因见文件内注释）：7 个插件各自带 patch，启动器的 reconcile 会把它们逐个加进 profile 的 bundle 列表。
+本包装上后，它的 patch 会把 7 个插件逐行插进组合树。
+
+> 不要再单独装其中的某个插件——那样同一个 id 会被插两次。要单个就只装那一个。
 
 - 仓库：<https://github.com/zfdx123/dsh-atelier>
 - 需要 DSH `^0.1.6-alpha.1`、Node `^22.19.0 || >=24.0.0`

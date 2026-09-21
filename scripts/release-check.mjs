@@ -14,7 +14,15 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const packagesDir = path.join(root, 'packages')
-const RELEASE_VERSION = '1.0.0'
+/** The plugins release in lockstep. */
+const PLUGIN_VERSION = '1.0.0'
+/**
+ * The aggregator versions on its own: it only carries the bundle composition, so
+ * changing which plugins are in the set must not force a republish of plugins
+ * whose code did not change. Its dependency ranges must still admit the
+ * plugins' current version.
+ */
+const AGGREGATOR = 'dsh-atelier'
 const EXCLUDED = new Set(['dsh-opencode-go'])
 
 const problems = []
@@ -50,7 +58,11 @@ for (const name of dirs) {
 
   // npm
   if (j.private === true) fail(name, 'is private — npm publish would refuse it')
-  if (j.version !== RELEASE_VERSION) fail(name, `version is ${j.version}, expected ${RELEASE_VERSION}`)
+  if (name === AGGREGATOR) {
+    if (!/^\d+\.\d+\.\d+/.test(j.version ?? '')) fail(name, `version "${j.version}" is not semver`)
+  } else if (j.version !== PLUGIN_VERSION) {
+    fail(name, `version is ${j.version}, expected ${PLUGIN_VERSION}`)
+  }
   if (j.publishConfig?.access !== 'public') fail(name, 'publishConfig.access must be "public" (scoped packages default to restricted)')
   if (j.repository === undefined) fail(name, 'has no repository field (npm shows no source link)')
   if (j.license === undefined) fail(name, 'has no license field')
@@ -79,23 +91,36 @@ for (const name of dirs) {
   }
 }
 
-// the meta package must depend on exactly the other packages, at the release version
-const meta = manifests.get('dsh-atelier')
+// the meta package must depend on exactly the other packages, at the plugins' version
+const meta = manifests.get(AGGREGATOR)
 if (meta === undefined) {
-  fail('dsh-atelier', 'the aggregator package is missing')
+  fail(AGGREGATOR, 'the aggregator package is missing')
 } else {
   const deps = meta.j.dependencies ?? {}
   // dependency keys are package names (scoped); the map is keyed by directory name
   const bare = (n) => n.slice(n.lastIndexOf('/') + 1)
-  const expected = [...manifests.keys()].filter((n) => n !== 'dsh-atelier').sort()
+  const expected = [...manifests.keys()].filter((n) => n !== AGGREGATOR).sort()
   const actual = Object.keys(deps).map(bare).sort()
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    fail('dsh-atelier', `dependencies are ${actual.join(', ')} but the packages are ${expected.join(', ')}`)
+    fail(AGGREGATOR, `dependencies are ${actual.join(', ')} but the packages are ${expected.join(', ')}`)
   }
   for (const [dep, range] of Object.entries(deps)) {
-    if (range !== `^${RELEASE_VERSION}`) fail('dsh-atelier', `dependency ${dep} is "${range}", expected "^${RELEASE_VERSION}"`)
+    if (range !== `^${PLUGIN_VERSION}`) fail(AGGREGATOR, `dependency ${dep} is "${range}", expected "^${PLUGIN_VERSION}"`)
   }
-  if (meta.j.dsh?.bundle?.patch === undefined) notes.push('dsh-atelier declares no dsh.bundle patch — the launcher will report it as a plain dependency')
+  // Without a patch the launcher reports the aggregator as a plain dependency and
+  // NOTHING it pulled in gets activated: reconcile() only walks the profile's own
+  // direct dependencies, and the plugins arrive as transitive ones.
+  const patch = meta.j.dsh?.bundle?.patch
+  if (patch === undefined) {
+    fail(AGGREGATOR, 'declares no dsh.bundle.patch — installing it would activate nothing')
+  } else if (!fs.existsSync(path.join(meta.dir, patch))) {
+    fail(AGGREGATOR, `dsh.bundle.patch "${patch}" does not exist`)
+  } else {
+    const text = fs.readFileSync(path.join(meta.dir, patch), 'utf8')
+    const inserted = [...text.matchAll(/^\s*name:\s*'?(@zfdx123\/[a-z0-9-]+)'?\s*$/gm)].map((m) => m[1])
+    const missing = expected.map((n) => `@zfdx123/${n}`).filter((n) => !inserted.includes(n))
+    if (missing.length > 0) fail(AGGREGATOR, `its patch does not insert: ${missing.join(', ')}`)
+  }
 }
 
 // no credentials, ever
@@ -143,4 +168,4 @@ if (problems.length > 0) {
   for (const p of problems) process.stdout.write(`  - ${p}\n`)
   process.exit(1)
 }
-process.stdout.write(`\nrelease-check passed: ${manifests.size} packages at ${RELEASE_VERSION}\n`)
+process.stdout.write(`\nrelease-check passed: ${manifests.size} packages (plugins ${PLUGIN_VERSION}, aggregator ${meta?.j.version ?? '?'})\n`)

@@ -1,11 +1,30 @@
-# Intentionally empty.
+# @zfdx123/dsh-atelier bundle patch：把 7 个插件行一起插进组合树。
 #
-# This package is a pure aggregator: installing it pulls the seven plugins in as
-# dependencies, and the launcher's reconcile() step adds every newly installed
-# dependency that declares `dsh.bundle` to the profile's bundle list — each
-# plugin therefore contributes its own cordis.patch.yml row on its own.
+# 为什么必须显式插入（而不是靠依赖自动激活）：
+# 启动器的 reconcile() 只遍历 **profile 清单的直接依赖**（`dsh-plugin-manager`
+# `lib/index.js:44` 的 `Object.keys(after.dependencies)`）。装本包时，7 个插件是
+# 本包的**传递依赖**，不在那个列表里，所以不会被自动加进 bundle 列表——
+# 少了这段 insert，装完只会得到代码、组合树里一行都没有。
 #
-# Declaring a patch here that inserted those same rows would register every
-# plugin twice. The file exists only so this package is recognised as a bundle
-# instead of being reported as "installed as a plain dependency".
-[]
+# 反过来，如果用户单独装其中某个插件（`dsh plugin add @zfdx123/dsh-memery`），
+# 那个包会成为直接依赖并被自动激活，此时**不要**再装本包，否则同一个 id 会被
+# 插两次。二选一即可：要全套装本包，要单个装那个包。
+#
+# id 与各插件自己 patch 里的 id 保持一致，用户仍可按 id 覆盖（例如
+# `- id: dsh-memery` + `disabled: true`）。name 必须与各包 package.json 的
+# name 完全一致；带 scope 的包名在 YAML 里必须加引号。
+- insert:
+    - id: dsh-codegraph
+      name: '@zfdx123/dsh-codegraph'
+    - id: dsh-mcp-manager
+      name: '@zfdx123/dsh-mcp-manager'
+    - id: dsh-memery
+      name: '@zfdx123/dsh-memery'
+    - id: dsh-plugin-hooks-ordering
+      name: '@zfdx123/dsh-plugin-hooks-ordering'
+    - id: dsh-session-cleaner
+      name: '@zfdx123/dsh-session-cleaner'
+    - id: dsh-skills-manager
+      name: '@zfdx123/dsh-skills-manager'
+    - id: dsh-superpowers
+      name: '@zfdx123/dsh-superpowers'
