@@ -23,6 +23,12 @@ jobs:
           node-version: '24'
       - name: npm 11.5.1+ (OIDC publishing)
         run: npm install -g npm@latest
+      - name: toolchain the packages' own suites need
+        run: |
+          # pnpm: dsh-plugin-hooks-ordering and dsh-skills-manager are pnpm-locked
+          # @colbymchenry/codegraph: dsh-codegraph's suite exercises the real CLI and
+          #   exits 1 when it is missing, by design
+          npm install -g pnpm@10 @colbymchenry/codegraph
       - run: npm install
       - run: npm run check
       - run: npm run install:all
