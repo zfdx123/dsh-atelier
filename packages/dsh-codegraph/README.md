@@ -167,8 +167,9 @@ codegraph 的官方 MCP server 在工作区**未建立索引时暴露 0 个工�
    插件按这个顺序解析可执行文件：
    1. `DSH_CODEGRAPH_EXECUTABLE`（若已设置，必须存在）；
    2. **本包自己的 `node_modules/.bin`**——npm/pnpm 把依赖的 `codegraph` shim 装在这里，而这个目录
-      **不在 PATH 上**；查找会从包根逐级向上走：pnpm 把它放在包自己的 `node_modules/.bin`（虚拟 store 的包目录内，
-      已实测），npm 不提升时同样如此；npm 把依赖提升到 profile 根时，则落在 `<profile>/node_modules/.bin`；
+      **不在 PATH 上**。查找从包根逐级向上走，所以几种布局都能命中：pnpm 装在包自己的 `node_modules/.bin`
+      （虚拟 store 的包目录内，已实测）；npm 不提升时同样在包内；npm 把依赖提升到 profile 根时，落在
+      `<profile>/node_modules/.bin`。
    3. `PATH`——沿用你已有的全局安装：`npm i -g @colbymchenry/codegraph`（或官方 install.sh / npm thin shim）。
 
    想手动确认 CLI 可用：

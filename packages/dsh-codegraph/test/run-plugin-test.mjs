@@ -916,7 +916,10 @@ section('7d) missing executable: an explicit override and the auto path both exp
   if (overrideMessage && overrideMessage.includes('DSH_CODEGRAPH_EXECUTABLE') && overrideMessage.includes(bogus)) {
     ok('a missing override path is reported by name', overrideMessage.slice(0, 90))
   } else {
-    bad('a missing override must name the override, not fall back', overrideMessage === null ? 'did not throw' : overrideMessage)
+    bad(
+      'a missing override must name the override, not fall back',
+      overrideMessage === null ? 'did not throw' : overrideMessage,
+    )
   }
 
   // (b) No override, no shim anywhere, nothing on PATH → the install hint, from
@@ -939,7 +942,8 @@ section('7d) missing executable: an explicit override and the auto path both exp
         thrown = error
       }
       if (thrown === null) bad('resolution must fail when nothing is installed')
-      else if (thrown.message === executableHint()) ok('no shim + nothing on PATH → the install hint', thrown.message.slice(0, 60) + '…')
+      else if (thrown.message === executableHint())
+        ok('no shim + nothing on PATH → the install hint', thrown.message.slice(0, 60) + '…')
       else bad('the hint text drifted from lib/executable.js', thrown.message)
     }
 
