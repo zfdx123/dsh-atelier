@@ -4,7 +4,7 @@
  * sections alone. Deliberately NOT a topological sort — a cycle is represented
  * faithfully rather than throwing, because the graph is most useful precisely
  * when the constraints conflict and `topoSort` would fail.
- * @module dsh-plugin-hooks-ordering/dag
+ * @module dsh-hooks-ordering/dag
  */
 
 import type { Orderable } from './topo-sort.ts'

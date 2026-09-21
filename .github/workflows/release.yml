@@ -30,7 +30,7 @@ jobs:
           node-version: '24'
       - name: npm 11.5.1+ (OIDC publishing)
         run: npm install -g npm@latest
-      - name: pnpm (dsh-plugin-hooks-ordering and dsh-skills-manager are pnpm-locked)
+      - name: pnpm (dsh-hooks-ordering and dsh-skills-manager are pnpm-locked)
         # `@colbymchenry/codegraph` used to be installed globally here: the
         # dsh-codegraph suite exercises the real CLI and exits 1 when it is
         # missing. It is now a declared dependency of that package, so
@@ -38,7 +38,7 @@ jobs:
         # shim from the package's own node_modules/.bin.
         run: npm install -g pnpm@10
       - run: npm install
-      # install first: dsh-memery and dsh-plugin-hooks-ordering ship lib/ as a
+      # install first: dsh-memery and dsh-hooks-ordering ship lib/ as a
       # build output, so the release gate can only see main/exports after a build
       - run: npm run install:all
       - run: npm run check
@@ -63,7 +63,7 @@ jobs:
         run: |
           # `npm stage publish` runs each package's prepare/prepublishOnly, which
           # BUILDS lib/ — esbuild for dsh-memery, tsdown for
-          # dsh-plugin-hooks-ordering. Those devDependencies have to exist in THIS
+          # dsh-hooks-ordering. Those devDependencies have to exist in THIS
           # job: the verify job's install does not carry over between jobs.
           npm install -g pnpm@10
           npm install

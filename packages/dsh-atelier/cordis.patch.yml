@@ -21,7 +21,7 @@
     - id: dsh-memery
       name: '@zfdx123/dsh-memery'
     - id: dsh-plugin-hooks-ordering
-      name: '@zfdx123/dsh-plugin-hooks-ordering'
+      name: '@zfdx123/dsh-hooks-ordering'
     - id: dsh-session-cleaner
       name: '@zfdx123/dsh-session-cleaner'
     - id: dsh-skills-manager

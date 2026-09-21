@@ -2,7 +2,7 @@
  * Deterministic topological sort for named entries carrying `before`/`after`
  * ordering constraints. Zero runtime dependencies: the sort is a pure function
  * of its input, independent of any Cordis context or plugin load order.
- * @module dsh-plugin-hooks-ordering/topo-sort
+ * @module dsh-hooks-ordering/topo-sort
  */
 
 /** An entry that can be ordered relative to others by name. */

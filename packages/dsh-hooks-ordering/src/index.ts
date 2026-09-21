@@ -1,5 +1,5 @@
 /**
- * `dsh-plugin-hooks-ordering` — deterministic before/after ordering for Cordis
+ * `dsh-hooks-ordering` — deterministic before/after ordering for Cordis
  * hooks whose participants are contributed by independent, mutually-unaware
  * plugins.
  *
@@ -13,7 +13,7 @@
  * - `./serial` — {@link SerialHookOrdering}, for `serial` hooks.
  * - `./dsh` — the DeepSeek-Harness layer (separate entry point).
  *
- * @module dsh-plugin-hooks-ordering
+ * @module dsh-hooks-ordering
  */
 
 // Pure ordering algebra.

@@ -12,7 +12,7 @@
  * pass-through, so nothing changes until participants register with
  * `before`/`after`.
  *
- * @module dsh-plugin-hooks-ordering/dsh
+ * @module dsh-hooks-ordering/dsh
  */
 
 import type { Context } from '@deepseek-ai/cordis'

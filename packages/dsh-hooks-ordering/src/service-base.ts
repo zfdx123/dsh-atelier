@@ -6,7 +6,7 @@
  * runs (waterfall wraps the native chain via `next()`; serial runs participants
  * ahead of it with bail short-circuiting). Registration, planning, DAG dumping,
  * and optional file logging are identical, so they live here.
- * @module dsh-plugin-hooks-ordering/service-base
+ * @module dsh-hooks-ordering/service-base
  */
 
 import { writeFileSync } from 'node:fs'

@@ -1,6 +1,6 @@
-# @zfdx123/dsh-plugin-hooks-ordering
+# @zfdx123/dsh-hooks-ordering
 
-为 [Cordis](https://github.com/cordiverse/cordis) 钩子提供确定性的 `before`/`after` 排序：钩子的参与者由相互独立、彼此无感知的插件贡献，`waterfall` 与 `serial` 两种派发方式都支持，并附带可选的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 层，开箱即可控制真实的 dsh 钩子。它解决的问题很具体——Cordis 按**注册顺序**派发 waterfall 监听器（也就是它们在内部监听器数组中的位置，`prepend` 是唯一可用的调节手段），而注册顺序又由 `inject` 依赖的激活时机决定，**互不相关的插件之间的激活顺序是不确定的**，于是「认证先于日志、净化器先于序列化器、指标最后执行」这类真正要紧的顺序其实悄悄依赖于没人控制的加载顺序，改一个看似无关的 `inject` 就会翻转。本包**不需要**修改或 fork Cordis：它是一个普通 Cordis 插件，**包住**指定的钩子并自行决定参与者顺序，参与者注册到协调器上（而不是原始钩子），用 `before`/`after` 名字声明约束，再由一个稳定的拓扑排序定序——与插件加载时机无关。当前版本 1.0.0，面向 DSH `^0.1.6-alpha.1`。
+为 [Cordis](https://github.com/cordiverse/cordis) 钩子提供确定性的 `before`/`after` 排序：钩子的参与者由相互独立、彼此无感知的插件贡献，`waterfall` 与 `serial` 两种派发方式都支持，并附带可选的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 层，开箱即可控制真实的 dsh 钩子。它解决的问题很具体——Cordis 按**注册顺序**派发 waterfall 监听器（也就是它们在内部监听器数组中的位置，`prepend` 是唯一可用的调节手段），而注册顺序又由 `inject` 依赖的激活时机决定，**互不相关的插件之间的激活顺序是不确定的**，于是「认证先于日志、净化器先于序列化器、指标最后执行」这类真正要紧的顺序其实悄悄依赖于没人控制的加载顺序，改一个看似无关的 `inject` 就会翻转。本包**不需要**修改或 fork Cordis：它是一个普通 Cordis 插件，**包住**指定的钩子并自行决定参与者顺序，参与者注册到协调器上（而不是原始钩子），用 `before`/`after` 名字声明约束，再由一个稳定的拓扑排序定序——与插件加载时机无关。当前版本 1.0.1，面向 DSH `^0.1.6-alpha.1`。
 
 ## 安装
 
@@ -8,13 +8,13 @@
 
 ```sh
 # 从 npm 安装单个包
-dsh plugin --profile web add @zfdx123/dsh-plugin-hooks-ordering
+dsh plugin --profile web add @zfdx123/dsh-hooks-ordering
 
 # 一次装齐整套（MCP 管理器、技能管理器、记忆、CodeGraph、钩子排序、会话清理、Superpowers）
 dsh plugin --profile web add @zfdx123/dsh-atelier
 
 # 从本地检出安装（本地开发）
-dsh plugin --profile <profile> add link:/absolute/path/to/dsh-plugin-hooks-ordering
+dsh plugin --profile <profile> add link:/absolute/path/to/dsh-hooks-ordering
 ```
 
 装完**重启 dsh**（bundle 不做热加载），设置页里就会出现「钩子排序」。
@@ -28,7 +28,7 @@ dsh plugin --profile <profile> add link:/absolute/path/to/dsh-plugin-hooks-order
 ### Waterfall 钩子
 
 ```ts
-import HookOrdering from '@zfdx123/dsh-plugin-hooks-ordering/waterfall'
+import HookOrdering from '@zfdx123/dsh-hooks-ordering/waterfall'
 
 ctx.plugin(HookOrdering)
 
@@ -68,7 +68,7 @@ HookOrdering,    load order [metrics, logging, auth]  ->  auth, logging, <宿主
 ### Serial 钩子
 
 ```ts
-import { SerialHookOrdering } from '@zfdx123/dsh-plugin-hooks-ordering'
+import { SerialHookOrdering } from '@zfdx123/dsh-hooks-ordering'
 
 ctx.plugin(SerialHookOrdering)
 ctx.serialHooksOrdering.control('turn/stopping')
@@ -132,9 +132,9 @@ ctx.plugin(HookOrdering, { log: './hooks-ordering-dag.json' })
 
   | 层 | 入口 | 提供什么 |
   | --- | --- | --- |
-  | 1. 算法 | `@zfdx123/dsh-plugin-hooks-ordering/topo-sort`、`/dag` | 纯的稳定拓扑排序，以及约束图（JSON）渲染器。零依赖，不涉及 Cordis。 |
-  | 2. Cordis 服务 | `@zfdx123/dsh-plugin-hooks-ordering/waterfall`、`/serial` | `HookOrdering` 与 `SerialHookOrdering`——可控制任意 Cordis 应用中的任意钩子。 |
-  | 3. DeepSeek-Harness | `@zfdx123/dsh-plugin-hooks-ordering`（根入口，即插件） | 一个 dsh 插件 + `cordis.patch.yml`，替你控制真实的 dsh 钩子，外加一个浏览器设置页。 |
+  | 1. 算法 | `@zfdx123/dsh-hooks-ordering/topo-sort`、`/dag` | 纯的稳定拓扑排序，以及约束图（JSON）渲染器。零依赖，不涉及 Cordis。 |
+  | 2. Cordis 服务 | `@zfdx123/dsh-hooks-ordering/waterfall`、`/serial` | `HookOrdering` 与 `SerialHookOrdering`——可控制任意 Cordis 应用中的任意钩子。 |
+  | 3. DeepSeek-Harness | `@zfdx123/dsh-hooks-ordering`（根入口，即插件） | 一个 dsh 插件 + `cordis.patch.yml`，替你控制真实的 dsh 钩子，外加一个浏览器设置页。 |
 
 - **为什么做成插件而不是 Cordis 内核的一部分。** Cordis 刻意保持精简：它提供排序的**原语**（数组位置、`prepend`、`next()` 链）。排序的**策略**——数值序号、`before`/`after`、拓扑排序——因钩子而异，不是内核该关心的事。做成插件意味着零框架修改，也没有需要长期维护的 fork。
 
@@ -181,7 +181,7 @@ ctx.plugin(HookOrdering, { log: './hooks-ordering-dag.json' })
     - id: hooks-ordering
       # 裸包名——见下面的说明。`/dsh` 也能作为插件入口，
       # 但那样 dsh 就找不到浏览器端那一半了。
-      name: '@zfdx123/dsh-plugin-hooks-ordering'
+      name: '@zfdx123/dsh-hooks-ordering'
       config:
         # hooks: ['agent/pre-step', 'tools/post-execute']   # 默认：所有返回契约兼容的 dsh waterfall 钩子
         # serialHooks: ['agent/turn-stopping']              # 默认：[agent/turn-stopping]
@@ -189,7 +189,7 @@ ctx.plugin(HookOrdering, { log: './hooks-ordering-dag.json' })
         # log: './hooks-ordering-dag.json'                  # 可选的 DAG 日志
 ```
 
-**这一行必须写包名，不能写子路径。** dsh 会把某一行的 `name` 映射回一个包，以便找到该包的浏览器端那一半（`dsh.client` → 设置页），而它的 `locatePkgJson` 只接受裸包标识符——`exactPackageSpecifier('@scope/name/subpath')` 返回 undefined，因为切分后得到三段。写成 `@zfdx123/dsh-plugin-hooks-ordering/dsh` 的那一行能完美加载宿主插件，然后悄悄地永远找不到客户端 bundle：没有设置页，而且任何地方都没有报错。这就是插件表面放在根入口的原因。
+**这一行必须写包名，不能写子路径。** dsh 会把某一行的 `name` 映射回一个包，以便找到该包的浏览器端那一半（`dsh.client` → 设置页），而它的 `locatePkgJson` 只接受裸包标识符——`exactPackageSpecifier('@scope/name/subpath')` 返回 undefined，因为切分后得到三段。写成 `@zfdx123/dsh-hooks-ordering/dsh` 的那一行能完美加载宿主插件，然后悄悄地永远找不到客户端 bundle：没有设置页，而且任何地方都没有报错。这就是插件表面放在根入口的原因。
 
 **出于同一类原因，根入口不带 `default` 导出。** 加载器会先用 `exports.default ?? exports` 规范化导入的模块，然后才应用它，所以一个并非该插件本身的 default 导出会劫持这一行：本包当时把 default（waterfall 服务）挂成了插件，`apply` 从未运行，结果是服务活着、却没有控制任何钩子，没有 serial 服务，没有设置命名空间，而且依然悄无声息。`HookOrdering` 从根入口按名字导出，同时仍然是 `/waterfall` 的默认导出。
 

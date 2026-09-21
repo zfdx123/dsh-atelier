@@ -12,7 +12,7 @@
  * - That is also why registration is wrapped in `try/catch` here: an optional
  *   settings form must never be able to stop the harness from booting.
  *
- * @module dsh-plugin-hooks-ordering/settings
+ * @module dsh-hooks-ordering/settings
  */
 
 import type { Context } from '@deepseek-ai/cordis'

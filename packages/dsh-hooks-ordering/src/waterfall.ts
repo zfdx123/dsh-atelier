@@ -15,7 +15,7 @@
  * and the coordinator runs them in a stable topological order it fully
  * controls. The serial-dispatch twin lives in `./serial.ts`.
  *
- * @module dsh-plugin-hooks-ordering/waterfall
+ * @module dsh-hooks-ordering/waterfall
  */
 
 import { type Context } from '@deepseek-ai/cordis'

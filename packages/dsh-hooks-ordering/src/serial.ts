@@ -15,7 +15,7 @@
  * Participants register into the coordinator (not the raw hook) with
  * `before`/`after` names and are run in a stable topological order.
  *
- * @module dsh-plugin-hooks-ordering/serial
+ * @module dsh-hooks-ordering/serial
  */
 
 import { type Context, isBailed } from '@deepseek-ai/cordis'

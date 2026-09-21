@@ -1,4 +1,4 @@
-// dsh-plugin-hooks-ordering — client half (classic script, no build step).
+// dsh-hooks-ordering — client half (classic script, no build step).
 //
 // dsh renders a settings UI from the CLIENT plane: a host-side
 // `settings.register(ns, schema)` only creates the namespace, its storage and
@@ -68,7 +68,7 @@
 
   // eslint-disable-next-line no-underscore-dangle -- the loader's own global; the name is not ours to choose.
   window.__ModuleLoader__.load({
-    id: '@zfdx123/dsh-plugin-hooks-ordering',
+    id: '@zfdx123/dsh-hooks-ordering',
     factory: function (require) {
       var module = { exports: {} }
       var exports = module.exports

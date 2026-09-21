@@ -1,4 +1,4 @@
-# The dsh-plugin-hooks-ordering bundle patch: mount the waterfall and serial
+# The dsh-hooks-ordering bundle patch: mount the waterfall and serial
 # ordering services and take control of the dsh hooks that multiple independent
 # packages contribute to (agent/pre-step, tools/post-execute,
 # system-prompt/assemble, agent/turn-stopping, …).
@@ -30,7 +30,7 @@
       # The BARE package name, not the `/dsh` subpath. dsh maps a row's name back
       # to a package to find the browser half (`dsh.client`); a subpath specifier
       # is not a package it can resolve, so the settings page would never appear.
-      name: '@zfdx123/dsh-plugin-hooks-ordering'
+      name: '@zfdx123/dsh-hooks-ordering'
       config:
         # hooks: ['agent/pre-step', 'tools/post-execute']
         # serialHooks: ['agent/turn-stopping']

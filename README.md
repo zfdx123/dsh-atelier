@@ -16,7 +16,7 @@ dsh plugin --profile web add @zfdx123/dsh-atelier
 | [`dsh-skills-manager`](packages/dsh-skills-manager) | 诊断、新建、编辑、开关、搬运磁盘上的技能（SKILL.md），并给模型一个 `skill_manager` 工具 | **技能管理**（另有侧栏入口） |
 | [`dsh-memery`](packages/dsh-memery) | 跨会话记忆：工作区 sqlite 库 + 首轮注入 + 每轮关键词命中 + `memory_*` 工具，无外部服务 | **记忆** |
 | [`dsh-codegraph`](packages/dsh-codegraph) | 代码知识图谱：把 `codegraph` CLI 包成 `codegraph_*` 工具，结构化提问前自动前置上下文 | （工具，无需设置） |
-| [`dsh-plugin-hooks-ordering`](packages/dsh-plugin-hooks-ordering) | 为 Cordis 的 waterfall / serial 钩子提供确定性的 before/after 排序 | **钩子排序** |
+| [`dsh-hooks-ordering`](packages/dsh-hooks-ordering) | 为 Cordis 的 waterfall / serial 钩子提供确定性的 before/after 排序 | **钩子排序** |
 | [`dsh-session-cleaner`](packages/dsh-session-cleaner) | 在运行中的 web 运行时里彻底删除会话：store 条目、工作区记录、磁盘产物、投影缓存 | **会话清理** |
 | [`dsh-superpowers`](packages/dsh-superpowers) | 软件开发方法论技能 + 会话引导（移植自 [obra/superpowers](https://github.com/obra/superpowers)） | （技能，无需设置） |
 
@@ -48,9 +48,9 @@ dsh plugin --profile web add @zfdx123/dsh-memery
 packages/
   dsh-atelier/                # 本入口包（纯聚合，patch 把上面 7 个插件一起插入）
   dsh-codegraph/
+  dsh-hooks-ordering/
   dsh-mcp-manager/
   dsh-memery/
-  dsh-plugin-hooks-ordering/
   dsh-session-cleaner/
   dsh-skills-manager/
   dsh-superpowers/

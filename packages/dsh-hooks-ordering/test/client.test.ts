@@ -255,7 +255,7 @@ function sectionContext(writable = true): unknown {
 describe('the client half', () => {
   it('registers under the package name, which is what the loader asserts', async () => {
     const registration = await loadClient()
-    expect(registration.id).toBe('@zfdx123/dsh-plugin-hooks-ordering')
+    expect(registration.id).toBe('@zfdx123/dsh-hooks-ordering')
   })
 
   it('exposes apply + inject once the factory is called with require', async () => {
