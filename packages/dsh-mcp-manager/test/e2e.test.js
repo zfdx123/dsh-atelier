@@ -629,6 +629,103 @@ describe('端到端：connection 服务后到（组合时序兜底）', () => {
   })
 })
 
+// ── 前置检查的判定必须是**持久**的 ───────────────────────────────────────
+//
+// README 承诺「启动前置检查 … 设置页状态直接给出可照改的一句话」。而这句话原本
+// 只存在于 mountOne 写下它、到 mcp-client 的真实异步失败把它顶掉之间的窗口里
+// （Windows 实测 50~200ms；Linux 的 ENOENT 在同一轮事件循环里就回来了）。用户
+// 实际看到的是「连接失败：SdkError: Connection closed」——正是前置检查存在的
+// 意义所在要替换掉的那句话。
+//
+// 这里断言的是持久的事实：等异步失败**确实发生**、且状态收敛之后，状态里仍然
+// 带着前置检查那句话；异步失败只能作为细节（failure）并入，不能把它顶掉。
+// 两条测试各覆盖一条覆盖路径：mcp-client 日志（logger exporter）与 apply 的 catch 兜底。
+describe('端到端：启动前置检查的判定在异步失败之后仍然保留', () => {
+  let harness
+  let base
+  let disposer
+  const logs = []
+
+  before(async () => {
+    harness = buildHarness()
+    harness.app.logger.exporter({ levels: { default: 3 }, export: (m) => logs.push(String(m.args?.[0] ?? '')) })
+    disposer = harness.app.plugin(Manager)
+    base = `http://127.0.0.1:${await harness.webServer.listen()}/api/mcp/servers`
+  })
+
+  after(async () => {
+    await harness.webServer.close()
+    await disposer.dispose()
+  })
+
+  /**
+   * 读状态直到它**收敛**：连续 400ms 读到同一份快照才算落定——这个窗口远大于
+   * Windows 上「前置检查文案被顶掉」的 50~200ms，所以收敛后再断言不可能是
+   * 「刚好落在窗口内」的假绿。返回最后一次快照，并把每次变化记进 timeline，
+   * 失败时能把「先出现前置检查文案、随后被顶掉」的全过程打出来。
+   */
+  async function settledStatus(name) {
+    const timeline = []
+    const started = Date.now()
+    let snapshot = null
+    let stableSince = Date.now()
+    for (;;) {
+      const res = await request(base, 'GET')
+      const entry = res.data.status[name]
+      const text = JSON.stringify(entry)
+      if (text !== snapshot) {
+        snapshot = text
+        stableSince = Date.now()
+        timeline.push({ atMs: Date.now() - started, status: entry })
+      }
+      if (Date.now() - stableSince >= 400) return { entry, timeline }
+      if (Date.now() - started > 15000) throw new Error(`状态未收敛：${JSON.stringify(timeline)}`)
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+  }
+
+  /** 断言的公共部分：主文案是前置检查那句话，异步失败并入了细节。 */
+  function assertPreflightKept(entry, timeline, name) {
+    const trail = `收敛时间线：${JSON.stringify(timeline)}`
+    assert.equal(entry.state, 'error', trail)
+    assert.match(entry.message, /启动前置检查未通过：找不到可执行文件/, `主文案应仍是前置检查的判定。${trail}`)
+    assert.ok(entry.message.includes(MISSING_BINARY), `主文案应点名那个不存在的可执行文件。${trail}`)
+    // 异步失败没有被丢掉，而是作为细节保留（用户既看到可照改的一句话，也看得到真实错误）
+    assert.match(
+      String(entry.failure),
+      /启动失败|连接失败/,
+      `${name} 的异步失败应并入 failure（而不是取代主文案）：${JSON.stringify(entry)}`,
+    )
+  }
+
+  it('failOnStartupError: true → apply 的 catch 兜底不再无条件覆盖前置检查的判定', async () => {
+    await request(base, 'POST', {
+      servers: [STDIO('ghost', { command: MISSING_BINARY, args: [], failOnStartupError: true })],
+    })
+    // 先等异步失败**确实发生**：这条由管理器自己在 catch 里打出，与平台无关。
+    await waitFor(() => logs.some((line) => line.includes('mcp-client(ghost) 启动失败')), {
+      label: 'ghost 的异步启动失败已发生',
+    })
+    const { entry, timeline } = await settledStatus('ghost')
+    assertPreflightKept(entry, timeline, 'ghost')
+  })
+
+  it('failOnStartupError: false → logger exporter 的合并也不再把前置检查的判定冲掉', async () => {
+    const current = await request(base, 'GET')
+    await request(base, 'POST', {
+      rev: current.data.rev,
+      servers: [...current.data.servers, STDIO('ghost2', { command: MISSING_BINARY, args: [] })],
+    })
+    // 等 mcp-client 自己那条「连接尝试失败」日志——它正是 exporter 的输入。
+    await waitFor(
+      () => logs.some((line) => line.startsWith('mcp-client(ghost2)') && line.includes('connection attempt failed')),
+      { label: 'ghost2 的异步连接失败已发生' },
+    )
+    const { entry, timeline } = await settledStatus('ghost2')
+    assertPreflightKept(entry, timeline, 'ghost2')
+  })
+})
+
 describe('端到端：settings 描述符字段被改名时仍能拿到修订号（上游预告的 ns→namespace）', () => {
   let harness
   let base

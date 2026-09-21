@@ -60,7 +60,10 @@ export function apply(ctx) {
   const handles = new Map()
   // serverName -> 已挂载实例的配置指纹（用于跳过未变化的服务器）
   const handleKeys = new Map()
-  // serverName -> { state: 'ok' | 'error' | 'disabled', message: string }
+  // serverName -> { state: 'ok' | 'error' | 'disabled', message: string, detail: boolean,
+  //                 preflight?: string, failure?: string }
+  // preflight 是启动前置检查的判定（持久的主文案），failure 是并入的异步失败细节；
+  // 两者的合并规则见 lib/logic.js 的 mergeMountStatus。
   const mountState = new Map()
   // serverName -> 该实例占用的 TLS 策略 origin
   const tlsOrigins = new Map()
@@ -193,11 +196,18 @@ export function apply(ctx) {
               const message = String((error && error.message) || error)
               const cause = describeErrorChain(error && error.cause ? error.cause : error)
               if (mountState.has(server.serverName)) {
-                mountState.set(server.serverName, {
-                  state: 'error',
-                  message: cause === '' ? `启动失败：${message}` : `启动失败：${message}（${cause}）`,
-                  detail: true,
-                })
+                // 走 mergeMountStatus 而不是无条件 set：前置检查已经写下的判定是
+                // **持久**的主文案，这里的真实启动失败只能作为细节（failure）并入，
+                // 不能把它顶掉——否则设置页又会退回「启动失败：…Connection closed」
+                // 这类用户照不了改的话（见 lib/logic.js 的 mergeMountStatus）。
+                mountState.set(
+                  server.serverName,
+                  mergeMountStatus(mountState.get(server.serverName), {
+                    state: 'error',
+                    message: cause === '' ? `启动失败：${message}` : `启动失败：${message}（${cause}）`,
+                    detail: true,
+                  }),
+                )
               }
               ctx.logger.warn(
                 `dsh-mcp-manager: mcp-client(${server.serverName}) 启动失败：${message}${cause === '' ? '' : `（${cause}）`}（实例保持存活以继续重连）`,
@@ -209,11 +219,13 @@ export function apply(ctx) {
       handles.set(server.serverName, handle)
       handleKeys.set(server.serverName, serverKey(server))
       // 前置检查没过就不要显示成「已挂载」——那会让用户以为差的是别的地方。
+      // 判定同时写进 preflight：客户端/合并逻辑据此把它当作**持久的主文案**，
+      // 之后 mcp-client 的真实异步失败只能作为细节并入（见 mergeMountStatus）。
       mountState.set(
         server.serverName,
         problem === null
           ? { state: 'ok', message: '', detail: false }
-          : { state: 'error', message: `启动前置检查未通过：${problem}`, detail: true },
+          : { state: 'error', message: `启动前置检查未通过：${problem}`, detail: true, preflight: problem },
       )
     } catch (error) {
       // 挂载失败（含 TLS 策略失败：缺 undici / CA 文件读不到）也要把刚登记
@@ -269,7 +281,8 @@ export function apply(ctx) {
   // （失败多为 warn 级）。exporter 默认只转发 <= info 级别的消息，这里显式
   // 声明 levels.default = 3 接收全部级别。exporter 随本插件 fiber 一起释放；
   // 只更新仍在管理中的服务器。合并规则见 mergeMountStatus：重试类固定文案
-  // 不会把上一行携带的具体原因（证书/ENOENT/401…）冲掉。
+  // 不会把上一行携带的具体原因（证书/ENOENT/401…）冲掉，也**不会**把启动前置
+  // 检查写下的判定冲掉——那条判定是持久的主文案，异步失败只并入 failure。
   ctx.logger.exporter({
     levels: { default: 3 },
     export: (message) => {

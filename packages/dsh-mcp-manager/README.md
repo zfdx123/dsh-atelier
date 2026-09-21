@@ -133,6 +133,10 @@ node scripts/probe-mcp-endpoint.mjs https://10.170.17.55:8091/mcp 你的token
 2. **启动前置检查**：可执行文件找不到、脚本文件（绝对路径）不存在、工作目录不存在、`command` 里仍含多个 token 时，设置页状态直接给出可照改的一句话，例如
    `启动前置检查未通过：找不到可执行文件：...（路径是否正确？或它在 PATH 里吗？）`
 
+   这句话是**持久的主文案**，不会被随后到来的真实异步失败顶掉（失败只作为第二行细节并入，例如 `连接失败：SdkError: Connection closed`）——你随时打开设置页看到的都是那句能照着改的话，同时看得到真实错误。唯一的例外是服务器**真的连上了**（重连成功）：那说明这次启发式判断错了，判定会被清掉，不会对着一个已经可用的服务器一直报错。
+
+   前置检查只是保守的启发式（只覆盖能静态判断、且几乎必然导致启动失败的情况），所以它**不会**阻止挂载：万一判断错了，实例照常挂载并继续重连。
+
 > Windows 上 venv 的可执行文件是 `Scripts\python.exe`；写 `Scripts\python` 也能用（Windows 会补 `.exe`，插件同样识别）。
 
 ### 密钥不入盘（`env:` / `cred:` 引用）
@@ -143,7 +147,7 @@ node scripts/probe-mcp-endpoint.mjs https://10.170.17.55:8091/mcp 你的token
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/mcp/servers` | 返回 `{ rev, servers, status }`；`rev` 是命名空间修订号（乐观锁），`status` 是 `serverName -> { state: 'ok'\|'error'\|'disabled', message }` |
+| GET | `/api/mcp/servers` | 返回 `{ rev, servers, status }`；`rev` 是命名空间修订号（乐观锁），`status` 是 `serverName -> { state: 'ok'\|'error'\|'disabled', message, detail, preflight?, failure? }`。`message` 是主文案（前置检查的判定优先），`failure` 是并入的异步失败细节（仅错误态），`preflight` 是那条判定的原文（存在即表示主文案受它保护） |
 | POST | `/api/mcp/servers` | 请求体 `{ rev?, servers: [...] }`，整体替换并触发重挂载；`rev` 与当前修订不符返回 409 `{ code: 'conflict', rev }`；校验失败返回 400 `{ error }` |
 
 接口的注册方式（DSH 0.1.5 起的兼容点）：

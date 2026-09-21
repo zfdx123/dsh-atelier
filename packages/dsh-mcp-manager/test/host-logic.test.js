@@ -571,6 +571,51 @@ describe('mergeMountStatus（重试类固定文案不冲掉具体原因）', () 
   })
 })
 
+// 前置检查的判定必须**持久**：它写下的主文案不能被后续的异步失败顶掉（否则设置页
+// 退回「连接失败：SdkError: Connection closed」，正是前置检查要替换掉的那句话）。
+// 端到端的行为断言在 test/e2e.test.js；这里把合并规则本身钉死，含「谁能清掉它」。
+describe('mergeMountStatus：启动前置检查的判定不被异步失败顶掉（回归：瞬时的可照改的一句话）', () => {
+  const PROBLEM = '找不到可执行文件：C:\\gone\\python.exe（路径是否正确？或它在 PATH 里吗？）'
+  const preflight = { state: 'error', message: `启动前置检查未通过：${PROBLEM}`, detail: true, preflight: PROBLEM }
+  const attempt = (message) => ({ state: 'error', message, detail: true })
+  const retrying = { state: 'error', message: '连接失败，重试中…', detail: false }
+  const ok = { state: 'ok', message: '', detail: false }
+
+  it('真实异步失败并入 failure，主文案仍是前置检查那句', () => {
+    const merged = mergeMountStatus(preflight, attempt('连接失败：SdkError: Connection closed'))
+    assert.equal(merged.state, 'error')
+    assert.equal(merged.message, `启动前置检查未通过：${PROBLEM}`)
+    assert.equal(merged.preflight, PROBLEM)
+    assert.equal(merged.failure, '连接失败：SdkError: Connection closed')
+    assert.equal(merged.detail, true)
+  })
+
+  it('重试类固定文案不冲掉已并入的具体失败', () => {
+    const once = mergeMountStatus(preflight, attempt('连接失败：SdkError: Connection closed'))
+    const twice = mergeMountStatus(once, retrying)
+    assert.equal(twice.message, `启动前置检查未通过：${PROBLEM}`)
+    assert.equal(twice.failure, '连接失败：SdkError: Connection closed')
+  })
+
+  it('细节取最近一条带具体原因的失败（新原因比旧原因有用）', () => {
+    const once = mergeMountStatus(preflight, attempt('启动失败：spawn ENOENT'))
+    const twice = mergeMountStatus(once, attempt('启动失败：EACCES'))
+    assert.equal(twice.failure, '启动失败：EACCES')
+  })
+
+  it('连接成功清掉前置检查的判定（启发式这次判断错了，不该继续喊狼来了）', () => {
+    assert.deepEqual(mergeMountStatus(preflight, ok), ok)
+  })
+
+  it('没有前置检查时行为不变，也不凭空多出 preflight/failure 键', () => {
+    assert.deepEqual(mergeMountStatus(attempt('连接失败：旧原因'), attempt('连接失败：新原因')), {
+      state: 'error',
+      message: '连接失败：新原因',
+      detail: true,
+    })
+  })
+})
+
 describe('substituteSecretRefs（密钥引用解析，不入盘）', () => {
   it('env:/cred: 引用被替换，非引用值原样保留', async () => {
     const config = {

@@ -320,14 +320,35 @@ export function mcpClientLogToStatus(message) {
 }
 
 /**
- * 把一次日志翻译结果并入既有挂载状态：新的「无详情」错误不覆盖已有的原因，
- * 恢复成功（state ok）则一律以新状态为准（消息清空）。
- * @param {{state: string, message: string, detail?: boolean}|undefined} previous
+ * 把一次日志翻译结果并入既有挂载状态。
+ *
+ * 两条规则：
+ *
+ * 1. **前置检查的判定是持久的**（`preflight`）：它一旦写下，后续的异步失败只能
+ *    作为细节并入 `failure`，不能把主文案顶掉——README 承诺「设置页状态直接给出
+ *    可照改的一句话」，而那句话原本只活在「mountOne 写下它」到「真实异步失败把它
+ *    覆盖掉」之间的窗口里（Windows 实测 ~60ms，Linux <1ms），用户实际看到的是
+ *    「连接失败：SdkError: Connection closed」——正是前置检查要替换掉的那句话。
+ *    唯一能清掉它的是**连接成功**（state ok）：那说明这个保守启发式这次判断错了，
+ *    不该继续对着一个已经连上的服务器喊狼来了。
+ * 2. 其余情况沿用原规则：新的「无详情」错误不覆盖已有的原因；恢复成功一律以新
+ *    状态为准（消息清空）。
+ * @param {{state: string, message: string, detail?: boolean, preflight?: string, failure?: string}|undefined} previous
  * @param {{state: string, message: string, detail?: boolean}|null|undefined} update
- * @returns {{state: string, message: string, detail: boolean}|undefined}
+ * @returns {{state: string, message: string, detail: boolean, preflight?: string, failure?: string}|undefined}
  */
 export function mergeMountStatus(previous, update) {
   if (!update) return previous
+  const preflight = previous !== undefined && typeof previous.preflight === 'string' ? previous.preflight : null
+  if (preflight !== null && update.state !== 'ok') {
+    const merged = { state: update.state, message: previous.message, detail: true, preflight }
+    // 细节保留「最近一条带具体原因的失败」：重试类固定文案（detail:false）不该把
+    // 上一条真实原因（证书 / ENOENT / Connection closed…）冲掉。
+    const failure = update.detail === true ? update.message : previous.failure
+    if (typeof failure === 'string' && failure !== '') merged.failure = failure
+    return merged
+  }
+
   const keepDetail =
     previous !== undefined &&
     previous.detail === true &&

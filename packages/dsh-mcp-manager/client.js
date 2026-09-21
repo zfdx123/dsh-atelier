@@ -372,6 +372,9 @@ window.__ModuleLoader__.load({
       title: { margin: 0, fontSize: 16, fontWeight: 500, lineHeight: '24px', color: 'var(--mcp-fg)' },
       intro: { margin: 0, fontSize: 13, lineHeight: '20px', color: 'var(--mcp-fg-3)' },
       error: { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--mcp-error)' },
+      // 错误状态里的第二行：宿主并入的异步失败细节（failure）。比主文案弱一档，
+      // 让「可照改的一句话」保持视觉上的第一顺位。
+      errorDetail: { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--mcp-fg-3)', wordBreak: 'break-all' },
       ok: { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--mcp-success)' },
       card: {
         border: '1px solid var(--mcp-border)',
@@ -857,7 +860,12 @@ window.__ModuleLoader__.load({
           ),
         ),
         e('div', { style: S.detail }, detail),
+        // 主文案：宿主给的第一顺位原因（前置检查的判定就在这里——它必须是用户
+        // 先看到、且**一直**看得到的那句「可照改的一句话」）。
         status && status.state === 'error' ? e('p', { style: S.error }, status.message) : null,
+        // 细节：宿主并入的真实异步失败（连接失败：SdkError: Connection closed…）。
+        // 它不再顶掉主文案，但也不能丢——用户排障时两段都要。
+        status && status.state === 'error' && status.failure ? e('p', { style: S.errorDetail }, status.failure) : null,
         e(
           'div',
           { style: S.actions },

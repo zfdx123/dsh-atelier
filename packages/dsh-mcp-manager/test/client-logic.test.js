@@ -512,6 +512,63 @@ describe('ServerRow：确认态与请求在途（回归：删除在途时可重�
   })
 })
 
+// 前置检查的判定是**主文案**，异步失败只能作为细节。README 承诺的「设置页状态
+// 直接给出可照改的一句话」最终就落在这两行渲染上：宿主把两段都放进状态，设置页
+// 必须先显示可照改的那句，而不是只显示（或先显示）「连接失败：SdkError:
+// Connection closed」——那正是前置检查存在的意义所在要替换掉的那句话。
+describe('ServerRow：前置检查的判定在前、异步失败作为细节在后（回归：可照改的一句话被冲掉）', () => {
+  const noop = () => {}
+  const server = { serverName: 'ghost', transport: 'stdio', command: 'nope-binary', args: [], enabled: true }
+  const row = (status) =>
+    client.ServerRow({
+      server,
+      status,
+      toggling: false,
+      deleting: false,
+      pending: null,
+      onToggle: noop,
+      onAsk: noop,
+      onConfirm: noop,
+      onCancel: noop,
+      onEdit: noop,
+    })
+
+  const PROBLEM = '找不到可执行文件：C:\\gone\\python.exe（路径是否正确？或它在 PATH 里吗？）'
+  const PREFLIGHT = `启动前置检查未通过：${PROBLEM}`
+  const FAILURE = '连接失败：SdkError: Connection closed'
+
+  it('两段都渲染，可照改的那句在前', () => {
+    const texts = collectText(
+      row({ state: 'error', message: PREFLIGHT, detail: true, preflight: PROBLEM, failure: FAILURE }),
+    )
+    assert.ok(texts.includes(PREFLIGHT), `应显示前置检查那句话，实际渲染：${JSON.stringify(texts)}`)
+    assert.ok(texts.includes(FAILURE), `异步失败应作为细节保留，实际渲染：${JSON.stringify(texts)}`)
+    assert.ok(
+      texts.indexOf(PREFLIGHT) < texts.indexOf(FAILURE),
+      `前置检查那句应排在异步失败前面：${JSON.stringify(texts)}`,
+    )
+  })
+
+  it('没有 failure 时只渲染主文案一行（不凭空多一行）', () => {
+    const texts = collectText(row({ state: 'error', message: FAILURE, detail: true }))
+    assert.deepEqual(
+      texts.filter((text) => text.includes('SdkError')),
+      [FAILURE],
+    )
+  })
+
+  it('ok / disabled 状态不渲染 failure（历史错误不留在绿点上）', () => {
+    for (const state of ['ok', 'disabled']) {
+      const texts = collectText(row({ state, message: '', detail: false, failure: FAILURE }))
+      assert.equal(
+        texts.some((text) => text.includes('SdkError')),
+        false,
+        `${state} 状态不应渲染 failure：${JSON.stringify(texts)}`,
+      )
+    }
+  })
+})
+
 describe('外壳原生控件：kit 路径与降级路径', () => {
   const noop = () => {}
   const server = { serverName: 'github', transport: 'stdio', command: 'npx', args: ['-y', 'pkg'], enabled: true }
