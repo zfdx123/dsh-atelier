@@ -15,12 +15,14 @@ permissions:
 
 jobs:
   verify:
-    # Windows, not Linux. dsh-mcp-manager's suite asserts Windows path semantics —
-    # fixtures such as `C:\gone\missing.py` and `C:\nope`, for which isAbsolute()
-    # is false on POSIX — so those cases cannot pass on a Linux runner. The
-    # runtime code is platform-aware; the *suite* is what is Windows-bound.
-    # Porting those fixtures is tracked separately so a Linux job can be added.
-    runs-on: windows-latest
+    # Both platforms, deliberately: these plugins run wherever Node runs, so a
+    # suite that only passes on Windows cannot catch a POSIX regression. The
+    # suites assert platform-appropriate values rather than Windows literals.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
