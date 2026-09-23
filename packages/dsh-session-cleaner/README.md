@@ -32,7 +32,7 @@ dsh plugin --profile web add file:/absolute/path/to/dsh-atelier/packages/dsh-ses
 
 ### 侧边栏 ⋮ 菜单
 
-会话行右侧 ⋮ → **「删除会话」**，位置紧跟在**「归档会话」下面**。点击 → 确认框 → 该行立即消失。会话正在运行时该项置灰；已打开（有 agent 附着）的会话会被服务端拒绝，请先关闭它。
+会话行右侧 ⋮ → **「删除会话」**，位置紧跟在**「归档会话」下面**。点击 → 确认框 → 该行立即消失。**只有正在运行（`running`）的会话会被拒绝**——等它跑完再删；闲置（`idle`）的会话照删不误，也就是「我在界面里已经离开的会话」都能删。
 
 ### 设置页「会话清理」
 
@@ -69,14 +69,14 @@ await fetch('/api-ext/session.delete', {
 响应沿用 host 的 JSON 信封：
 
 ```json
-{ "ok": true,  "value": { "liveBefore": true, "liveDetached": true,
+{ "ok": true,  "value": { "agentStatus": "idle", "liveBefore": true, "liveDetached": true,
                           "accounting": { "unarchived": true, "detached": ["…"] },
                           "files": { "root": "…", "removed": ["…"], "failed": [] },
                           "projection": { "ok": true, "deleted": true } } }
 { "ok": false, "error": { "code": "refused", "message": "…" } }
 ```
 
-状态码：`200` 成功；`400 bad-request`（id 非法 / JSON 坏）；`405 method-not-allowed`（方法不是 POST）；`415 unsupported-media-type`（`content-type` 不是 `application/json`——两个路由都只收 JSON）；`409 refused`（会话被打开）；`500 internal`。
+状态码：`200` 成功；`400 bad-request`（id 非法 / JSON 坏）；`405 method-not-allowed`（方法不是 POST）；`415 unsupported-media-type`（`content-type` 不是 `application/json`——两个路由都只收 JSON）；`409 refused`（会话正在运行）；`500 internal`。
 
 ### 排查：诊断路由
 
@@ -90,6 +90,8 @@ await fetch('/api-ext/session.cleaner.diag', {
 }).then(r => r.json());
 ```
 
+报告里还会给出 `agentStatus`——就是决定「删还是拒」的那一个字段（`null` 表示本进程里没有附着 agent，`idle` 可删，`running` 会被拒）。
+
 它不删任何东西，是「插件到底看见了什么」的安全查看方式。
 
 ## 它做什么
@@ -97,8 +99,9 @@ await fetch('/api-ext/session.cleaner.diag', {
 - **删除四个表面。** 一次 `deleteSession` 依次做四件事：
 
   1. **live store**：如果该会话有内存条目就 detach 掉（`SessionStore.enter()` 返回的那个 disposer），并把该会话从**前端**的会话列表里摘掉。
-     > **踩过的坑：光 detach 不会让前端掉行。** 前端唯一的「会话没了」通知是 `session/disposed`，而 `SessionStore.detachEntered` 只在 `entry.announced === true` 时才发它——只有 agent 真正打开过的会话才会置位（`sessions.enter` 只由 agent loop 调用；`session.list` 只是读 live 条目、其余从持久化 `summarizeCold`，**不会**把冷会话 prepare/enter 进 store）。而本路由**拒绝**一切有 agent 附着的会话，所以它删掉的会话根本没有内存条目、任何事件都不会发。detach 那一步因此是**防御性**保留的：万一有「agent 已消失、条目还在」的残留，也不能让它变成一个指向已删文件的幽灵行。
-     > 真正让界面掉行的是客户端：删完由客户端自己调 `ctx.sessions.handleSessionRemoved(id)`（正是 `api-session/removed` 中继调用的那个方法），再 `refresh()` 跟 host 基线对账——host 基线来自磁盘上的会话日志，已经不含它了。
+     > **为什么会话会出现「有 agent 附着」这件事。** DSH 把一个会话装进内存的唯一入口是 agent：`sessions.enter` 只由 agent loop 调用，`session.list` 只是读 live 条目、其余从持久化 `summarizeCold`，**不会**把冷会话 prepare/enter 进 store。而 agent 一旦建立就**没有退出路径**——唯一的清理是 agent-loop 工厂自己那条生命周期 disposer（`dsh-agent-loop` `lib/index.js` 的 `dispose()`，`detachAgent?.(); detachSession?.()`），它只在 owner fiber 卸载时才跑。所以「在界面里点开过、现在没在跑」的会话，在**这次的 dsh web 进程里**永远带着一个 `status: 'idle'` 的 agent。早期版本因此把「有 agent」当成「被打开」一律拒绝，结果是这类会话**在重启前根本删不掉**（用户看到的是「已关闭的会话点了删除没反应」）——这是 bug，不是设计。
+     > **现在只拦真正在跑的。** `agent.status === 'running'`（以及读不出状态这种无法归类的情况）才 `409 refused`；`idle` 照删：先 `detach` 掉 store 条目（`detachEntered` 在 `entry.announced === true` 时会发 `session/disposed`），再删文件。删完之后**磁盘上已不存在可追加的会话**，残留的 idle agent 对象停在记录表里（见「已知限制」）。
+     > **踩过的坑：光 detach 不够时靠谁掉行。** 前端唯一的「会话没了」通知是 `session/disposed`，它只在 `entry.announced === true` 时才发。真正让界面掉行的是**客户端**：删完由客户端自己调 `ctx.sessions.handleSessionRemoved(id)`（正是 `api-session/removed` 中继调用的那个方法），再 `refresh()` 跟 host 基线对账——host 基线来自磁盘上的会话日志，已经不含它了。
   2. **记账**：从全局归档集合移除，并从每个记账了它的 workspace 移除（host 会据此推 `archived` 帧给前端，两个设置页的归档集合因此同步）。
   3. **磁盘**：删除 `<sessions 根>/<project>/<sessionId>`（遍历全部 project 目录，只删名字**恰好等于** id 的目录）。
   4. **投影缓存**：删除 `session_projcache` 里该会话的行（文件搜索索引是派生的，会自行收敛）；域没打开时该行保留，只写一条 warn 日志，删除本身仍然成功。
@@ -109,7 +112,7 @@ await fetch('/api-ext/session.cleaner.diag', {
   - 只有 `Esc`、点遮罩、点 `[取消]` 或删除成功才会关闭。
 - **⋮ 菜单与图标。** 菜单是命令式 DOM、没有自己的 React 树，所以这一侧的确认框挂在一个独立的 React root 上（`react-dom/client` 的 `createRoot`），用完即卸载；确认框本身与设置页是同一个组件。三个图标同样用 DSH 自己的图标组件，不自绘：搜索框 `IconSearchOutline16`、组头折叠箭头 `IconChevronDownOutline14`、⋮ 菜单里的 `IconTrashOutline16`。（图标组件只收 `{size, className}`，转发不了 `style`/`aria-hidden`，所以定位、旋转、颜色挂在图标外面那层 box 上，两条路径共用同一个 box。）⋮ 菜单里那个图标由 React 渲染进一个临时容器、把 SVG 取出来后再把临时 root 卸掉——菜单项背后不留挂着的 root。
 - **组件库缺席就整体降级。** 组件库不存在或**缺少其中任一成员**时，插件整体退回自绘 SVG（确认框同时退回 `window.confirm`）：`loadPrimitives` 的形态检查是**全有或全无**的，所以「只到了一半」的组件库不会让界面变成一半原生一半自绘。
-- **安全边界。** id 必须匹配 `^(session-)?<uuid>$`，否则直接 `bad-request`，不会进入任何路径拼接；**有 agent 附着的会话拒绝删除**（running 或 idle 都算「已打开」）——不会把别人正在用的会话从底下抽走；只删「位于 sessions 根之下、且目录名恰好等于该 id」的目录；两个路由都校验 HTTP 方法（POST）**和** JSON content-type（不符返回 415）。
+- **安全边界。** id 必须匹配 `^(session-)?<uuid>$`，否则直接 `bad-request`，不会进入任何路径拼接；**正在运行的会话拒绝删除**（`agent.status === 'running'`，以及状态读不出来这种无法归类的情况）——不会把正在跑的活儿从底下抽走；只删「位于 sessions 根之下、且目录名恰好等于该 id」的目录；两个路由都校验 HTTP 方法（POST）**和** JSON content-type（不符返回 415）。
 - **sessions 根与宿主同源。** `sessionsRoot()` 复刻宿主的 `DSH_HOME` 处理：`$DSH_HOME` 为空或纯空白视为未设置 → `~/.dsh/sessions`；`~`、`~/`、`~\` 先展开再 `resolve`；相对路径按工作目录解析——所以插件和持久化后端永远指向同一棵树。
 - **形态：bundle 而不是动态插件。** 同样的功能先用动态 Cordis 插件做过一版（未随本仓库发布）。bundle 形态在三点上更好：
 
@@ -130,9 +133,10 @@ await fetch('/api-ext/session.cleaner.diag', {
 
 - **⋮ 菜单靠 DOM 增强。** DSH 没有给行菜单公开 Slot，所以只能在菜单打开时往里插一项。识别方式是**语义**的：同一处新增（或从它向上 6 层）同时含「归档会话」与「分叉会话/重命名」两个文案才认定为会话行菜单，插入点是包含两者的最小元素；行优先取**刚点击的 ⋮ 触发器**（`aria-label` 前缀或 `rowActions` 容器，3 秒新鲜度窗口），窗口外才退回 `closest('[role="treeitem"]')`——不靠矩形距离猜测。若 DSH 改了这些文案或结构，该项会静默不出现（设置页仍然可用），诊断路由会记录跳过原因。
 - **会话 id 从 React fiber 里读。** 行的 DOM 上没有任何携带 id 的属性，所以从行元素的 `__reactFiber$*` / `__reactInternalInstance$*` 向上找 10 层，取 `memoizedProps.node.id`（或 `props.sessionId` / `props.node.sessionId`）。拿不到才退回标题反查（走 `/api/session.list` 的目录，标题**重复时跳过注入**，避免删错）；目录取不到时只损失「运行中」标记，行仍可用。
-- **会话打开中（running 或 idle agent）时拒绝删除**，不代用户关会话。
+- **正在运行（`running`）的会话拒绝删除**，不代用户中止。
+- **删除后会在记录表里留下一个「孤儿」agent 对象（idle）。** 宿主没有对外公开的「卸载单个 agent」入口：能正常收尾的那条路（关持久化句柄、发 `agent/disposed`、把条目移出 `ctx.agents`）是 agent-loop 工厂私有的生命周期 disposer，只挂在 owner fiber 的 teardown 链上；从外面只能拿到 `scope` 或 store 条目，单独 `detach` 会留下一个「agent 还在、store 条目没了」的悬空对象（这正是早期版本要防的幽灵行）。所以本插件**不动它**：删除后该 agent 停在 `idle` 且其会话已从 store 摘除、磁盘已删，不会再跑任何一轮（会话重开也走不到它：`session.list` 只从持久化读列表，日志已不存在）。残留对象随进程结束消失，想立刻清空就重启 `dsh web`。
 - **删除不可恢复**：文件、记账、live 条目、投影缓存行都会消失。
-- **不广播 `session/disposed`。** 被删的冷会话本来就没有 live 条目，所以宿主不会发任何「会话没了」的事件——本页面由客户端自己把行摘掉；**其他已打开的页面/标签页要刷新才会同步**。
+- **不广播 `session/disposed`（冷会话场景）。** 被删的会话若没有 live 条目，宿主不会发任何「会话没了」的事件——本页面由客户端自己把行摘掉；**其他已打开的页面/标签页要刷新才会同步**。
 - **投影缓存域没打开时那一行会保留**（只写 warn 日志，删除仍返回成功）：缓存是折叠快捷方式而不是权威，下次冷读会自行收敛。
 - **宿主半改动要重启进程**；客户端半刷新页面即可，但 bundle 整体不做热加载。
 

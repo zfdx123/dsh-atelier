@@ -318,7 +318,10 @@ async function mount(options = {}) {
         return {
           ok: false,
           status: 409,
-          json: async () => ({ ok: false, error: { code: 'refused', message: 'session is open' } }),
+          json: async () => ({
+            ok: false,
+            error: { code: 'refused', message: 'session "…" is running, close it before deleting' },
+          }),
         }
       }
       return { ok: true, status: 200, json: async () => ({ ok: true, value: { sessionId: body.sessionId } }) }
@@ -660,7 +663,7 @@ export const clientCases = [
       assert.ok(open !== null, 'a refusal must not close the dialog')
       const alert = find(open, (element) => element.props.role === 'alert')
       assert.ok(alert !== null, 'the refusal must be shown inline')
-      assert.equal(textOf(alert).includes('正被打开'), true, 'the refusal text explains why')
+      assert.equal(textOf(alert).includes('正在运行'), true, 'the refusal text names what is in the way')
       assert.equal(
         harness.calls.some((call) => call.kind === 'alert'),
         false,

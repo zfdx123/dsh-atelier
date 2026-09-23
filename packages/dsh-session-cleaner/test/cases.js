@@ -245,17 +245,73 @@ export const cases = [
   ],
 
   [
-    'deleteSession refuses a session with an attached agent',
+    'deleteSession refuses a session whose agent is running',
     async (assert) => {
-      const { ctx } = makeCtx({ agentStatus: 'idle' })
-      let message = ''
+      const root = makeTree()
+      const { ctx } = makeCtx({ agentStatus: 'running', liveIds: [SESSION] })
       try {
-        await deleteSession(ctx, SESSION)
-      } catch (error) {
-        message = error.message
-        assert.equal(error.code, 'refused')
+        let message = ''
+        try {
+          await deleteSession(ctx, SESSION, { root })
+        } catch (error) {
+          message = error.message
+          assert.equal(error.code, 'refused')
+        }
+        assert.match(message, /running|in use/i, message)
+        assert.equal(existsSync(join(root, '--proj-a--', SESSION)), true, 'a refused delete touches no files')
+      } finally {
+        rmSync(root, { recursive: true, force: true })
       }
-      assert.match(message, /attached|open/i)
+    },
+  ],
+
+  [
+    'deleteSession refuses an agent status it cannot read',
+    async (assert) => {
+      const root = makeTree()
+      const { ctx } = makeCtx({ liveIds: [SESSION] })
+      // `makeCtx` reads `agentStatus: undefined` as "no agent"; this case needs an
+      // agent whose status the guard cannot classify, so it is patched in place
+      // and restored before the scratch tree is dropped.
+      const before = ctx.agents.get
+      ctx.agents.get = (id) => ({ id })
+      try {
+        let message = ''
+        try {
+          await deleteSession(ctx, SESSION, { root })
+        } catch (error) {
+          message = error.message
+          assert.equal(error.code, 'refused')
+        }
+        assert.match(message, /in use|attached/i, message)
+      } finally {
+        ctx.agents.get = before
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
+  ],
+
+  [
+    'deleteSession deletes a session with an IDLE agent instead of refusing it',
+    async (assert) => {
+      const root = makeTree()
+      const workspace = { id: 'ws-1', sessionIds: [SESSION], detachSession: async () => {} }
+      const { ctx, store } = makeCtx({
+        agentStatus: 'idle',
+        liveIds: [SESSION],
+        archived: [SESSION],
+        workspaces: [workspace],
+      })
+      try {
+        const value = await deleteSession(ctx, SESSION, { root })
+        assert.equal(value.agentStatus, 'idle', 'the report names the agent that was detached')
+        assert.equal(value.liveDetached, true, 'the live entry is detached, not left behind')
+        assert.equal(store.has(SESSION), false)
+        assert.equal(existsSync(join(root, '--proj-a--', SESSION)), false)
+        assert.equal(value.accounting.unarchived, true)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
     },
   ],
 

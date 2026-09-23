@@ -11,19 +11,20 @@
 //      session ever has an entry: the agent loop is the sole `sessions.enter`
 //      caller, and `session.list` reads live entries while summarizing every
 //      other session from persistence — it does not prepare cold sessions into
-//      the store. Because this route refuses any session with an attached
-//      agent, the detach is a defensive guard, kept so a store entry that
-//      outlived its agent cannot survive as a row over deleted files;
+//      the store. An IDLE agent is detached and deleted; a RUNNING one is
+//      refused, because interrupting work in flight is not this plugin's to do;
 //   2. drops the id from the global archive set and from every workspace
 //      record that accounts for it;
 //   3. deletes the on-disk artifact directory `<root>/<project>/<sessionId>`;
 //   4. deletes the session's `session_projcache` row (the file search index is
 //      derived and prunes itself).
 //
-// The sidebar row itself is dropped by the CLIENT half: `session/disposed` —
-// the event the session controller forwards as `api-session/removed` — only
-// fires for an ANNOUNCED live entry, and a deleted session has no live entry
-// for the reason above.
+// The sidebar row itself is dropped by the CLIENT half, which calls the store's
+// own `handleSessionRemoved` and then reconciles against the host baseline —
+// `session/list` reads the deleted session's log from persistence, so the
+// refreshed baseline no longer carries the row. (`session/disposed` fires too
+// whenever the detached entry was announced, but the client's own removal is
+// what makes the row leave without waiting for that event.)
 //
 // Everything is `node:fs` — no shell, no quoting, no platform branch.
 //
@@ -297,17 +298,25 @@ export async function deleteSession(ctx, sessionId, options = {}) {
     error.code = 'bad-request'
     throw error
   }
-  // An attached agent — running OR idle — means the session is open in the UI.
-  // Tearing an open session down from under its owner is not this plugin's
-  // business, so it refuses and lets the user close it first.
+  // An agent at work is not this plugin's to interrupt: a `running` agent is
+  // mid-turn, and a status this build does not know could be anything, so both
+  // are refused and the user is told to wait.
   const agent = ctx.agents?.get?.(sessionId)
-  if (agent !== undefined) {
-    const status = typeof agent.status === 'string' ? agent.status : 'attached'
-    const error = new Error(`session "${sessionId}" is open (agent status: ${status}); close it before deleting`)
+  const agentStatus = agent === undefined ? null : typeof agent.status === 'string' ? agent.status : 'attached'
+  if (agentStatus !== null && agentStatus !== 'idle') {
+    const reason = agentStatus === 'running' ? 'is running' : `is in use (agent status: ${agentStatus})`
+    const error = new Error(`session "${sessionId}" ${reason}; wait for it to finish before deleting`)
     error.code = 'refused'
     throw error
   }
-
+  // An IDLE agent is what every session the UI has ever shown keeps in the
+  // registry — DSH never tears one down when the user leaves a session, so it
+  // would otherwise stay undeletable for the life of the process. Nothing is
+  // being computed, so the delete proceeds; the live entry goes through the
+  // store's own disposer (which also emits `session/disposed` when the entry was
+  // announced), and the deleted session's files can no longer be appended to.
+  // The registry's agent object outlives this deletion — see the README's
+  // "已知限制" — which is why `agentStatus` is reported back (see below).
   const liveBefore = ctx.sessions?.get?.(sessionId) !== undefined
   const liveDetached = detachLiveEntry(ctx.sessions, sessionId)
   const accounting = await detachAccounting(ctx, sessionId)
@@ -321,6 +330,7 @@ export async function deleteSession(ctx, sessionId, options = {}) {
 
   return {
     sessionId,
+    agentStatus, // the attached agent this delete went through, or null when none
     liveBefore, // true when a live store entry existed (only an agent session has one)
     liveDetached,
     accounting,
