@@ -18,7 +18,9 @@ const here = dirname(fileURLToPath(import.meta.url))
 
 /**
  * 起一个自签名 HTTPS MCP 服务器。
- * @param {{certDir?: string, toolName?: string, onRequest?: Function}} [options]
+ * @param {{certDir?: string, toolName?: string, onRequest?: Function, hang?: boolean}} [options]
+ *   `hang: true` 时服务器接受连接但**永不响应**——用来复现「包被丢弃 / 端口
+ *   被防火墙静默丢弃」这类挂起：TLS 与 TCP 都成功，MCP 握手永远等不到回应。
  * @returns {Promise<{url: string, port: number, close: () => Promise<void>, requests: string[]}>}
  */
 export async function createTlsMcpServer(options = {}) {
@@ -27,6 +29,8 @@ export async function createTlsMcpServer(options = {}) {
   const key = readFileSync(join(certDir, 'localhost-key.pem'))
   const cert = readFileSync(join(certDir, 'localhost-cert.pem'))
   const requests = []
+  /** 挂起模式下保持连接的响应对象，close 时统一放掉，避免测试进程卡住。 */
+  const hanging = new Set()
 
   const send = (res, payload, status = 200) => {
     const body = JSON.stringify(payload)
@@ -37,6 +41,14 @@ export async function createTlsMcpServer(options = {}) {
   const server = createServer({ key, cert }, (req, res) => {
     requests.push(req.method)
     if (options.onRequest) options.onRequest(req)
+    if (options.hang === true) {
+      // 收下请求、什么都不回：调用方会一直等在 fetch 上（真实世界里这就是
+      // 被静默丢弃的包）。请求体照读不误，免得对端因为背压卡在发送侧。
+      hanging.add(res)
+      req.on('data', () => {})
+      req.on('end', () => {})
+      return
+    }
     if (req.method !== 'POST') {
       // MCP 规范：不支持 GET 的 standalone SSE / DELETE 会话终止时回 405。
       res.writeHead(405).end()
@@ -98,6 +110,12 @@ export async function createTlsMcpServer(options = {}) {
     url: `https://localhost:${port}/mcp`,
     port,
     requests,
-    close: () => new Promise((resolve) => server.close(resolve)),
+    close: () =>
+      new Promise((resolve) => {
+        for (const res of hanging) res.destroy()
+        hanging.clear()
+        server.close(resolve)
+        server.closeAllConnections?.()
+      }),
   }
 }

@@ -51,6 +51,42 @@ import { normalizeStdioServer, preflightStdioServer } from './lib/stdio.js'
 export const name = 'dsh-mcp-manager'
 export const inject = ['settings']
 
+/**
+ * 确认窗口（毫秒）：挂载完成到「能证明连上了」之间允许的时间。
+ *
+ * 两件事要分清：
+ *
+ * 1. **网络错误本身是会被抓到的**（我原先误判成「要等 30–130 秒」）。实测黑洞
+ *    地址（192.0.2.1，包被丢弃）：undici 的 connect timeout 是 **10 秒**，之后
+ *    mcp-client 的 catch 打出 `connection attempt failed: … fetch failed ←
+ *    UND_ERR_CONNECT_TIMEOUT Connect Timeout Error（网络层失败：…）`，插件把它
+ *    翻成带原因链的错误状态，之后每次重试再更新。所以「连不上」早就有反馈，
+ *    不需要这里兜底。
+ * 2. **这 10 秒里卡片原本是绿的。** `ctx.plugin()` 返回只说明实例建好了；
+ *    mcp-client 连接成功不打任何日志，挂载到第一次失败日志之间没有任何信号，
+ *    旧实现直接写 `ok` → 这段时间（以及任何不产生失败日志的路径）显示「已挂载」。
+ *
+ * 所以窗口只负责**覆盖那段没有证据的时间**，并且必须**比传输层自己的超时长**，
+ * 否则会在真实原因（UND_ERR_CONNECT_TIMEOUT + 可操作提示）即将到达时，抢先
+ * 用一句更含糊的话把它盖掉。20 秒 = 10 秒连接超时 + 重试与派发余量。
+ */
+export const CONFIRM_TIMEOUT_MS = 20000
+
+/** stdio 的确认窗口：spawn 失败是立即的（ENOENT/EACCES 亚秒级），不必等满 HTTP 那一档。 */
+export const CONFIRM_TIMEOUT_STDIO_MS = 5000
+
+/** 该传输的确认窗口（测试可用环境变量缩短）。 */
+function confirmTimeoutFor(transport) {
+  const raw = Number(process.env.DSH_MCP_MANAGER_CONFIRM_MS)
+  if (Number.isFinite(raw) && raw > 0) return raw
+  return transport === 'stdio' ? CONFIRM_TIMEOUT_STDIO_MS : CONFIRM_TIMEOUT_MS
+}
+
+/** 确认窗口超时后的文案：说清楚「实例在、但没连上」，而不是含糊的「失败」。 */
+export function unconfirmedMessage(serverName, timeoutMs) {
+  return `已挂载但 ${Math.round(timeoutMs / 1000)} 秒内未确认连上：服务器没有回应，也没有注册任何工具。请确认地址/端口可达、服务已启动、证书受信任（必要时开「允许自签名证书」）。`
+}
+
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' }
 
 export function apply(ctx) {
@@ -67,6 +103,8 @@ export function apply(ctx) {
   const mountState = new Map()
   // serverName -> 该实例占用的 TLS 策略 origin
   const tlsOrigins = new Map()
+  // serverName -> 确认窗口定时器（有正向证据时取消）
+  const confirmTimers = new Map()
 
   // 挂载串行链 + 去抖：同一 tick 多次 settings/updated 合并成一次 sync。
   let syncChain = Promise.resolve()
@@ -115,6 +153,7 @@ export function apply(ctx) {
 
   const unmountOne = async (serverName, { keepStatus = false } = {}) => {
     await disposeHandle(serverName)
+    cancelConfirmation(serverName)
     // 服务器被移出配置时才清状态；enabled:false 的「关闭」要保留 disabled 状态，
     // 否则卸载收尾会把它刚写下的 disabled 抹掉，设置页对这台已关闭的服务器
     // 就退回默认显示「已挂载」（绿点）——状态与事实相反。
@@ -124,6 +163,105 @@ export function apply(ctx) {
       tlsOrigins.delete(serverName)
       await tls.release(origin)
     }
+  }
+
+  /**
+   * 取消某台服务器的确认窗口（卸载、重挂、或已有正向证据时调用）。
+   * @param {string} serverName
+   */
+  const cancelConfirmation = (serverName) => {
+    const timer = confirmTimers.get(serverName)
+    if (timer !== undefined) {
+      clearTimeout(timer)
+      confirmTimers.delete(serverName)
+    }
+  }
+
+  /**
+   * 标记「连上了」：有工具注册或成功日志时的唯一正向信号。取消确认窗口，
+   * 并把状态收敛成 ok（除非当前是前置检查写下的判定——那由 mergeMountStatus
+   * 的规则处理，不能在这里抢）。
+   * @param {string} serverName
+   */
+  const confirmConnected = (serverName) => {
+    cancelConfirmation(serverName)
+    const current = mountState.get(serverName)
+    if (current === undefined || current.state === 'disabled') return
+    if (current.state === 'connecting' || (current.state === 'ok' && current.message === '')) {
+      mountState.set(serverName, { state: 'ok', message: '', detail: false })
+    }
+  }
+
+  /**
+   * 开一个确认窗口：窗口内保持连接中，窗口结束仍没有任何证据就转成错误。
+   * @param {object} server - 已挂载的服务器配置
+   */
+  const beginConfirmation = (server) => {
+    cancelConfirmation(server.serverName)
+    const timeout = confirmTimeoutFor(server.transport)
+    const timer = setTimeout(() => {
+      confirmTimers.delete(server.serverName)
+      const current = mountState.get(server.serverName)
+      // 已经被日志改成 error/ok 就不覆盖：日志带来的原因（证书、401…）比
+      // 这句「没回应」更具体。
+      if (current === undefined || current.state !== 'connecting') return
+      mountState.set(server.serverName, {
+        state: 'error',
+        message: unconfirmedMessage(server.serverName, timeout),
+        detail: true,
+      })
+      ctx.logger.warn(`dsh-mcp-manager: 服务器 "${server.serverName}" 已挂载但未确认连上（${timeout}ms 内无回应）`)
+    }, timeout)
+    // 不阻塞进程退出。
+    if (typeof timer.unref === 'function') timer.unref()
+    confirmTimers.set(server.serverName, timer)
+  }
+
+  /**
+   * 观察工具注册：`mcp__<名>__<工具>` 出现即证明这台服务器**确实连上了**。
+   *
+   * 为什么需要它：mcp-client 连接成功时**不打任何日志**（只在失败时打），而工具
+   * 是在子插件自己的上下文里注册的，管理器看不见。没有这个信号，「挂载完成」
+   * 就成了唯一的依据——一台只接受连接、永不响应的服务器会让卡片一直亮绿。
+   *
+   * 做法是给注入进来的 `tools` 服务包一层 register 观察器（原样转发、原样返回
+   * disposer），并在本插件 fiber 卸载时还原。服务缺失时不装：那只损失「提前转
+   * 绿」，确认窗口的超时判定照旧兜底。
+   */
+  const TAP_FLAG = Symbol.for('dsh-mcp-manager.toolRegistrationTap')
+  const observeToolRegistration = () => {
+    ctx.inject(['tools'], (childCtx) => {
+      const tools = childCtx.get('tools')
+      if (tools === undefined || tools === null || tools[TAP_FLAG] === true) return
+      if (typeof tools.register !== 'function') return
+      const original = tools.register
+      tools.register = function observedRegister(definition, ...rest) {
+        const serverName = mcpToolServerName(definition !== null && typeof definition === 'object' ? definition.name : undefined)
+        if (serverName !== null) confirmConnected(serverName)
+        return original.call(this, definition, ...rest)
+      }
+      Object.defineProperty(tools, TAP_FLAG, { value: true, configurable: true })
+      childCtx.effect(
+        () => () => {
+          tools.register = original
+          delete tools[TAP_FLAG]
+        },
+        'dsh-mcp-manager: 工具注册观察器',
+      )
+    })
+  }
+
+  /**
+   * 从工具名反解 serverName：`mcp__<serverName>__<tool>`，名字本身可能含下划线，
+   * 所以取第一段与最后一段之间的全部（与 mcp-client 的 publicToolName 约定一致）。
+   * @param {unknown} name
+   * @returns {string|null}
+   */
+  function mcpToolServerName(name) {
+    if (typeof name !== 'string' || !name.startsWith('mcp__')) return null
+    const rest = name.slice('mcp__'.length)
+    const at = rest.indexOf('__')
+    return at <= 0 ? null : rest.slice(0, at)
   }
 
   // `env:NAME` → 进程环境变量；`cred:NAME` → DSH 凭据。解析失败保留字面值。
@@ -221,12 +359,21 @@ export function apply(ctx) {
       // 前置检查没过就不要显示成「已挂载」——那会让用户以为差的是别的地方。
       // 判定同时写进 preflight：客户端/合并逻辑据此把它当作**持久的主文案**，
       // 之后 mcp-client 的真实异步失败只能作为细节并入（见 mergeMountStatus）。
-      mountState.set(
-        server.serverName,
-        problem === null
-          ? { state: 'ok', message: '', detail: false }
-          : { state: 'error', message: `启动前置检查未通过：${problem}`, detail: true, preflight: problem },
-      )
+      //
+      // 前置检查通过时**不再直接写 ok**：`ctx.plugin()` 返回只说明实例建好了，
+      // 不说明连上了（见 CONFIRM_TIMEOUT_MS 的说明）。先写「连接中」，等正向
+      // 证据（工具注册 / 成功日志）转绿，超时仍无证据则转错。
+      if (problem === null) {
+        mountState.set(server.serverName, { state: 'connecting', message: '', detail: false })
+        beginConfirmation(server)
+      } else {
+        mountState.set(server.serverName, {
+          state: 'error',
+          message: `启动前置检查未通过：${problem}`,
+          detail: true,
+          preflight: problem,
+        })
+      }
     } catch (error) {
       // 挂载失败（含 TLS 策略失败：缺 undici / CA 文件读不到）也要把刚登记
       // 的策略收回，避免留下无人释放的 origin。
@@ -288,6 +435,9 @@ export function apply(ctx) {
     export: (message) => {
       const update = mcpClientLogToStatus(message)
       if (!update || !mountState.has(update.serverName)) return
+      // 成功日志（重连成功 / 重新同步工具）是「确实连上了」的正向证据，
+      // 也是把 connecting 转成 ok 的两条路径之一（另一条是工具注册）。
+      if (update.state === 'ok') confirmConnected(update.serverName)
       mountState.set(update.serverName, mergeMountStatus(mountState.get(update.serverName), update))
     },
   })
@@ -297,6 +447,9 @@ export function apply(ctx) {
     if (ns !== 'mcp') return
     scheduleSync(next && Array.isArray(next.servers) ? next.servers : [])
   })
+
+  // 工具注册观察器必须在第一次挂载**之前**装好：那才是「确实连上了」的正向信号。
+  observeToolRegistration()
 
   // 启动时按当前配置挂载（enabled: false 的服务器只记录为已关闭）。
   const current = ctx.settings.get('mcp')

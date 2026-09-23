@@ -656,6 +656,21 @@ describe('外壳原生控件：kit 路径与降级路径', () => {
     assert.equal(statusTag('disabled').props.tone, 'neutral')
     assert.equal(statusTag('error').props.tone, 'danger')
     assert.equal(textOf(statusTag('disabled')), '已关闭')
+
+    // 「已挂载、尚未确认连上」不能画成成功：绿色 + 「已挂载」正是用户报的
+    // 「连不上却显示已挂载」。
+    assert.equal(statusDot('connecting').props.state, 'ongoing', '连接中不可以用 done 绿点')
+    assert.equal(statusTag('connecting').props.tone, 'outline', '连接中不可以用 success 语气')
+    assert.equal(textOf(statusTag('connecting')), '连接中')
+  })
+
+  it('降级路径：连接中用中性灰，不是成功绿', () => {
+    const mod = loadClientBundle({ primitives: null })
+    const html = JSON.stringify(mod.ServerRow(rowProps({ status: { state: 'connecting' } })))
+    const ok = JSON.stringify(mod.ServerRow(rowProps({ status: { state: 'ok' } })))
+    assert.ok(html.includes('--mcp-fg-3'), '连接中的点应是中性色')
+    assert.ok(!html.includes('--mcp-success'), '连接中不得出现成功色')
+    assert.ok(ok.includes('--mcp-success'), '已确认连接仍是成功色')
   })
 
   it('kit 路径：表单单行字段走原生 Input，多行与下拉保持插件自己的元素', () => {

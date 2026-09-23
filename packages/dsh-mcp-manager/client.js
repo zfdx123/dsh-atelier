@@ -62,6 +62,7 @@ window.__ModuleLoader__.load({
       edit: '编辑',
       remove: '删除',
       stateMounted: '已挂载',
+      stateConnecting: '连接中',
       stateDisabled: '已关闭',
       stateError: '错误',
       tagInsecure: '自签名',
@@ -137,6 +138,7 @@ window.__ModuleLoader__.load({
       edit: 'Edit',
       remove: 'Delete',
       stateMounted: 'Mounted',
+      stateConnecting: 'Connecting',
       stateDisabled: 'Disabled',
       stateError: 'Error',
       tagInsecure: 'Self-signed',
@@ -529,17 +531,30 @@ window.__ModuleLoader__.load({
 
     /** 插件状态 → 外壳 StateDot 的语义状态（拿不到外观时按老配色画点）。 */
     function dotColor(state) {
-      return state === 'error' ? 'var(--mcp-error)' : state === 'disabled' ? 'var(--mcp-fg-3)' : 'var(--mcp-success)'
+      if (state === 'error') return 'var(--mcp-error)'
+      // 连接中不是「成功」也不是「失败」：外壳没有 warning 态令牌，用中性灰。
+      if (state === 'connecting' || state === 'disabled') return 'var(--mcp-fg-3)'
+      return 'var(--mcp-success)'
     }
 
-    /** 插件状态 → 外壳 StateDot 的语义状态。 */
+    /**
+     * 插件状态 → 外壳 StateDot 的语义状态。
+     * `connecting`（已挂载、尚未确认连上）不能画成 done/绿：那正是「服务器没回应
+     * 却显示已挂载」的来源。
+     */
     function dotState(state) {
-      return state === 'error' ? 'error' : state === 'disabled' ? 'idle' : 'done'
+      return state === 'error' ? 'error' : state === 'disabled' ? 'idle' : state === 'connecting' ? 'ongoing' : 'done'
     }
 
     /** 插件状态 → 外壳 Tag 的语气色。 */
     function stateTone(state) {
-      return state === 'error' ? 'danger' : state === 'disabled' ? 'neutral' : 'success'
+      return state === 'error'
+        ? 'danger'
+        : state === 'disabled'
+          ? 'neutral'
+          : state === 'connecting'
+            ? 'outline'
+            : 'success'
     }
 
     /**
@@ -838,7 +853,13 @@ window.__ModuleLoader__.load({
           ? server.url
           : (server.command || '') + (server.args && server.args.length ? ' ' + server.args.join(' ') : '')
       var statusText =
-        state === 'error' ? t('stateError') : state === 'disabled' ? t('stateDisabled') : t('stateMounted')
+        state === 'error'
+          ? t('stateError')
+          : state === 'disabled'
+            ? t('stateDisabled')
+            : state === 'connecting'
+              ? t('stateConnecting')
+              : t('stateMounted')
       // 「开启」/「关闭」既是开关的无障碍名，也是它旁边显示的动作词（与改动前的按钮文案一致）。
       var toggleLabel = enabled ? t('disable') : t('enable')
       return e(
