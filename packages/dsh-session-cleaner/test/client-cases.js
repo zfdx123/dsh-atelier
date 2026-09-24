@@ -326,8 +326,19 @@ async function mount(options = {}) {
       }
       return { ok: true, status: 200, json: async () => ({ ok: true, value: { sessionId: body.sessionId } }) }
     }
-    if (url === '/api/session.list') {
-      calls.push({ kind: 'session-list' })
+    if (url === '/api/session/list') {
+      calls.push({ kind: 'session-list', method: body.method, payload: body.payload })
+      if (options.catalogError !== undefined) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            type: 'server-response',
+            rpcId: body.rpcId,
+            result: { ok: false, error: options.catalogError },
+          }),
+        }
+      }
       return { ok: true, status: 200, json: async () => ({ result: { value: { items: options.catalogItems ?? [] } } }) }
     }
     calls.push({ kind: 'diag', event: body.report?.event, detail: body.report?.detail })
@@ -554,6 +565,15 @@ function dialogButton(node, label) {
   return find(node, (element) => element.type === 'Button' && textOf(element) === label)
 }
 
+/** One row's own delete button, by session id. */
+function rowDelete(harness, sessionId) {
+  const row = find(harness.tree(), (element) => element.props['data-session-row'] === sessionId)
+  if (row === null) throw new Error(`no row for ${sessionId}`)
+  const action = button(row, (label) => label.startsWith('删除会话'))
+  if (action === null) throw new Error(`row ${sessionId} has no delete action`)
+  return action
+}
+
 /** Every group in render order: `{key, text, expanded, rows}`. */
 function groups(node) {
   const found = []
@@ -632,6 +652,47 @@ export const clientCases = [
   ],
 
   [
+    'client: a second delete opens a dialog that is not already deleting',
+    async (assert) => {
+      const harness = await mount({
+        sessions: [
+          { id: A, displayTitle: 'First', updatedAt: 2000, running: false },
+          { id: B, displayTitle: 'Second', updatedAt: 1000, running: false },
+        ],
+        workspaces: [{ workspaceId: 'w1', title: 'Alpha', sessionIds: [A, B] }],
+      })
+
+      rowDelete(harness, A).props.onClick()
+      await dialogButton(dialog(harness.tree()), '删除').props.onClick()
+      assert.equal(dialog(harness.tree()), null, 'the first delete closes the dialog')
+
+      // The dialog component stays mounted while it is closed — `title` is its
+      // open flag — so one attempt's own state must be gone by the time the next
+      // row opens it. A `pending` left behind by the finished delete would show
+      // 「正在删除…」 with both footer buttons disabled before anything ran, which
+      // is a delete that can never be started and never reports anything.
+      const second = rowDelete(harness, B)
+      assert.equal(second.props.disabled, false, 'the second row is not busy')
+      second.props.onClick()
+
+      const reopened = dialog(harness.tree())
+      assert.ok(reopened !== null, 'the second row opens the dialog')
+      assert.equal(
+        find(reopened, (element) => element.props.role === 'status'),
+        null,
+        'a freshly opened dialog must not claim a delete is already running',
+      )
+      assert.equal(dialogButton(reopened, '删除').props.disabled, false, 'its confirm button must be pressable')
+      await dialogButton(reopened, '删除').props.onClick()
+      assert.deepEqual(
+        harness.calls.filter((call) => call.kind === 'delete-request').map((call) => call.sessionId),
+        [A, B],
+        'the second delete reaches the host route',
+      )
+    },
+  ],
+
+  [
     'client: cancelling the dialog deletes nothing',
     async (assert) => {
       const harness = await mount()
@@ -649,6 +710,47 @@ export const clientCases = [
         'cancel must not drop the row',
       )
       assert.equal(dialog(harness.tree()), null, 'cancel closes the dialog')
+    },
+  ],
+
+  [
+    'client: a failure is not carried into the next dialog',
+    async (assert) => {
+      const harness = await mount({
+        deleteFails: true,
+        sessions: [
+          { id: A, displayTitle: 'First', updatedAt: 2000, running: false },
+          { id: B, displayTitle: 'Second', updatedAt: 1000, running: false },
+        ],
+        workspaces: [{ workspaceId: 'w1', title: 'Alpha', sessionIds: [A, B] }],
+      })
+
+      rowDelete(harness, A).props.onClick()
+      await dialogButton(dialog(harness.tree()), '删除').props.onClick()
+      assert.ok(
+        find(dialog(harness.tree()), (element) => element.props.role === 'alert') !== null,
+        'the refusal is shown inline',
+      )
+
+      dialogButton(dialog(harness.tree()), '取消').props.onClick()
+      assert.equal(dialog(harness.tree()), null, 'closing drops it')
+
+      // The dialog outlives its attempt while closed, so the failure it showed
+      // belongs to that attempt alone: the next session's dialog must not open
+      // on a refusal that never concerned it.
+      rowDelete(harness, B).props.onClick()
+      const reopened = dialog(harness.tree())
+      assert.ok(reopened !== null, 'the next row opens the dialog')
+      assert.equal(
+        find(reopened, (element) => element.props.role === 'alert'),
+        null,
+        'the previous refusal must not be shown for another session',
+      )
+      assert.equal(
+        String(reopened.props.description).includes('Second'),
+        true,
+        'the dialog names the session it now concerns',
+      )
     },
   ],
 
@@ -827,7 +929,7 @@ export const clientCases = [
   ],
 
   [
-    'client: the title catalog comes from /api/session.list, never from a `remote` service',
+    'client: the title catalog comes from the two-segment /api/session/list endpoint',
     async (assert) => {
       const harness = await mount({
         menu: true,
@@ -840,10 +942,20 @@ export const clientCases = [
       // The installer fetches the catalog without awaiting it.
       await new Promise((resolve) => setTimeout(resolve, 0))
 
-      assert.equal(
-        harness.calls.filter((call) => call.kind === 'session-list').length,
-        1,
-        '/api/session.list is the transport',
+      const listed = harness.calls.filter((call) => call.kind === 'session-list')
+      assert.equal(listed.length, 1, '/api/session/list is the transport')
+      // Three things have to line up for the host to answer: the endpoint is
+      // exactly two slash-separated segments (`claimsEndpoint` rejects anything
+      // else before looking the name up), the payload holds nothing but a
+      // plain-object `args` (`remoteRequest`), and `args` carries exactly the
+      // descriptor's parameter names (`assertExactArguments`) — `session/list`
+      // takes one, `_request`. Each one used to be wrong here, and each one made
+      // the catalog silently null.
+      assert.equal(listed[0].method, 'session/list', 'the envelope method is the endpoint the path names')
+      assert.deepEqual(
+        listed[0].payload,
+        { args: { _request: {} } },
+        'and the args carry exactly the descriptor’s parameter name',
       )
       const report = harness.calls.find((call) => call.kind === 'diag' && call.event === 'catalog')
       assert.ok(report !== undefined, 'the catalog result is reported for diagnosis')
@@ -854,6 +966,27 @@ export const clientCases = [
         [],
         'no reflective service read: a browser remote namespace is its own `remote.<namespace>` service',
       )
+    },
+  ],
+
+  [
+    'client: a refused catalog call reports the host’s own reason',
+    async (assert) => {
+      const harness = await mount({
+        menu: true,
+        catalogError: { code: 'gateway/arguments-invalid', message: 'args fields do not match the descriptor' },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      // The gateway answers a malformed call with an envelope of its own, not
+      // with silence. Reporting that reason is what turns "the catalog is always
+      // empty" into an actionable line in the diagnostic route.
+      const miss = harness.calls.find((call) => call.kind === 'diag' && call.event === 'catalog-miss')
+      assert.ok(miss !== undefined, 'the refusal is reported')
+      assert.equal(miss.detail.code, 'gateway/arguments-invalid', 'with the host’s error code')
+      assert.equal(miss.detail.status, 200, 'and the transport status it arrived on')
+      const report = harness.calls.find((call) => call.kind === 'diag' && call.event === 'catalog')
+      assert.equal(report.detail.ok, false, 'while the catalog itself stays absent')
     },
   ],
 

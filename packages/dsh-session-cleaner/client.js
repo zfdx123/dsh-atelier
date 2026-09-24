@@ -405,13 +405,30 @@ window.__ModuleLoader__.load({
       const [pending, setPending] = React.useState(false)
       const [error, setError] = React.useState(null)
 
+      /**
+       * Leave the dialog and drop the attempt's own state. This component stays
+       * MOUNTED while it is closed — `title` is the open flag, and the Settings
+       * page never unmounts it — so state kept past a close is handed to the
+       * next session's dialog: a `pending` left true by a finished delete would
+       * greet the next row already reading 「正在删除…」 with both footer buttons
+       * disabled, and `confirm` returns early on `pending`, so that delete can
+       * neither start nor fail. One opening owns one attempt's state; leaving is
+       * what ends it.
+       * @param deleted - whether the session was actually deleted.
+       */
+      const close = (deleted) => {
+        setPending(false)
+        setError(null)
+        onClose(deleted)
+      }
+
       const confirm = async () => {
         if (pending) return
         setPending(true)
         setError(null)
         try {
           await run()
-          onClose(true)
+          close(true)
         } catch (failure) {
           report('delete-failed', { message: String(failure?.message ?? failure) })
           setError(failureText(failure, labels))
@@ -423,7 +440,7 @@ window.__ModuleLoader__.load({
         Modal,
         {
           open: title !== null,
-          onClose: () => onClose(false),
+          onClose: () => close(false),
           closeLabel: labels.close,
           title: labels.title,
           ...(title === null ? {} : { description: labels.description(title) }),
@@ -434,7 +451,7 @@ window.__ModuleLoader__.load({
                 key: 'cancel',
                 variant: 'outline',
                 disabled: pending,
-                onClick: () => onClose(false),
+                onClick: () => close(false),
               },
               labels.cancel,
             ),
@@ -863,12 +880,26 @@ window.__ModuleLoader__.load({
      * only: id resolution prefers React's props, so a failed fetch costs the
      * running flag, not the feature.
      *
-     * `/api/session.list` is the single transport. The `remote` service is the
-     * transport owner, not a namespace holder — a browser remote namespace is
-     * its own `remote.<namespace>` service (DSH 0.1.6-alpha.2
-     * api-gateway `client.js`), so `ctx.get('remote').session` never resolves,
-     * and reading it reflectively would make the catalog depend on a service
-     * this plugin does not inject.
+     * `/api/session/list` is the single transport, and every part of that call is
+     * load-bearing:
+     *   - the endpoint must be exactly two slash-separated segments; the
+     *     gateway's `claimsEndpoint` rejects anything else before it looks the
+     *     name up, so a dotted `session.list` is never claimed and never
+     *     answers an envelope;
+     *   - the payload must hold nothing but a plain-object `args`
+     *     (`remoteRequest`);
+     *   - and `args` must carry exactly the descriptor's parameter names — the
+     *     host validates them (`assertExactArguments`). `session/list` takes one
+     *     parameter, `_request` (`SessionListRequest`, whose only field is an
+     *     optional `cursor`), so an unfiltered call is `{ _request: {} }`.
+     * A call that misses any of the three is answered with the gateway's own
+     * refusal envelope, which {@link fetchCatalog} reports rather than swallows.
+     *
+     * The `remote` service is the transport owner, not a namespace holder — a
+     * browser remote namespace is its own `remote.<namespace>` service (DSH
+     * 0.1.6-alpha.2 api-gateway `client.js`), so `ctx.get('remote').session`
+     * never resolves, and reading it reflectively would make the catalog depend
+     * on a service this plugin does not inject.
      */
     async function fetchCatalog() {
       const build = (items) => {
@@ -887,21 +918,36 @@ window.__ModuleLoader__.load({
         return { byTitle, byId }
       }
       try {
-        const response = await fetch('/api/session.list', {
+        const response = await fetch('/api/session/list', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           credentials: 'same-origin',
           body: JSON.stringify({
             type: 'client-request',
             rpcId: 'session-cleaner-' + Math.random().toString(36).slice(2),
-            method: 'session.list',
-            payload: {},
+            method: 'session/list',
+            payload: { args: { _request: {} } },
           }),
         })
         const body = await response.json()
-        if (body?.result === undefined) return null
+        // A refused call still comes back as the gateway's own envelope, so its
+        // reason is reported here: a wrong endpoint or a wrong args shape used to
+        // leave nothing behind but a null catalog.
+        if (body?.result?.ok === false) {
+          report('catalog-miss', {
+            status: response.status,
+            code: body.result.error?.code ?? null,
+            message: body.result.error?.message ?? null,
+          })
+          return null
+        }
+        if (body?.result === undefined) {
+          report('catalog-miss', { status: response.status, code: 'no-envelope', message: null })
+          return null
+        }
         return build(body.result?.value?.items)
-      } catch {
+      } catch (error) {
+        report('catalog-miss', { status: null, code: 'transport', message: String(error?.message ?? error) })
         return null // no catalog; the caller reports it and the row keeps working
       }
     }
