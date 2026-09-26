@@ -2,7 +2,7 @@
 
 ## 版本规则
 
-**7 个插件共用一个版本号**（当前 `1.0.8`），`scripts/release-check.mjs` 会强制这一点
+**7 个插件共用一个版本号**（当前 `1.0.9`），`scripts/release-check.mjs` 会强制这一点
 ——每个 `packages/*/package.json` 的 `version` 必须**等于** `PLUGIN_VERSION`。
 meta 包 `@zfdx123/dsh-atelier` 的 7 个依赖也必须写成 `^<插件版本>`。
 

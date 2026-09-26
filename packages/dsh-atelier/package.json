@@ -1,6 +1,6 @@
 {
   "name": "@zfdx123/dsh-atelier",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "DSH 插件工坊：一条命令装齐 7 个插件——MCP 服务器管理器、技能管理器、跨会话记忆、钩子排序、会话清理、代码知识图谱、Superpowers 方法论。",
   "keywords": [
     "deepseek-harness",
@@ -40,13 +40,13 @@
     }
   },
   "dependencies": {
-    "@zfdx123/dsh-codegraph": "^1.0.8",
-    "@zfdx123/dsh-mcp-manager": "^1.0.8",
-    "@zfdx123/dsh-memery": "^1.0.8",
-    "@zfdx123/dsh-hooks-ordering": "^1.0.8",
-    "@zfdx123/dsh-session-cleaner": "^1.0.8",
-    "@zfdx123/dsh-skills-manager": "^1.0.8",
-    "@zfdx123/dsh-superpowers": "^1.0.8"
+    "@zfdx123/dsh-codegraph": "^1.0.9",
+    "@zfdx123/dsh-mcp-manager": "^1.0.9",
+    "@zfdx123/dsh-memery": "^1.0.9",
+    "@zfdx123/dsh-hooks-ordering": "^1.0.9",
+    "@zfdx123/dsh-session-cleaner": "^1.0.9",
+    "@zfdx123/dsh-skills-manager": "^1.0.9",
+    "@zfdx123/dsh-superpowers": "^1.0.9"
   },
   "dsh": {
     "bundle": {

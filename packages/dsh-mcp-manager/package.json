@@ -1,6 +1,6 @@
 {
   "name": "@zfdx123/dsh-mcp-manager",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "MCP 服务器管理器：在 DSH 设置页配置 MCP 服务器，宿主侧按配置热挂载/卸载 mcp-client 实例（支持内网自签名证书）",
   "license": "MIT",
   "author": "zfdx123 <2915441170@qq.com>",
