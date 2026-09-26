@@ -1,6 +1,6 @@
 # @zfdx123/dsh-superpowers
 
-Brings the [obra/superpowers](https://github.com/obra/superpowers) software-development methodology to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): it registers 14 skills on `ctx.skills` (brainstorming, planning, TDD, systematic debugging, code review, and more) and injects the `using-superpowers` bootstrap as a system-prompt section, so it is present from the first request and survives context compaction. The skills are registered at runtime and never written to disk, so nothing is copied into `~/.dsh/skills` and no preset or profile skill directory has to change. This is version 1.0.0, targeting DSH `^0.1.6-alpha.1`.
+Brings the [obra/superpowers](https://github.com/obra/superpowers) software-development methodology to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): it registers 15 skills on `ctx.skills` (brainstorming, planning, TDD, systematic debugging, code review, session diagnosis, and more) and injects the `using-superpowers` bootstrap as a system-prompt section, so it is present from the first request and survives context compaction. The skills are registered at runtime and never written to disk, so nothing is copied into `~/.dsh/skills` and no preset or profile skill directory has to change. This is version 1.0.9, targeting DSH `^0.1.7-rc.2`.
 
 ## Installation
 
@@ -32,7 +32,7 @@ If the bootstrap never arrives, check the session's preset — a preset whose pe
 
 ## What it does
 
-- Registers all 14 skills on `ctx.skills`. They appear in the skill catalog and load on demand through the native `skill` tool; nothing is ever written to `~/.dsh/skills`.
+- Registers all 15 skills on `ctx.skills`. They appear in the skill catalog and load on demand through the native `skill` tool; nothing is ever written to `~/.dsh/skills`.
 - Registers `using-superpowers` as the `superpowers:bootstrap` prompt section at order 50: after the persona prefix (0), before the plan policy (500) and the tool guidance (1000+). It is present on the first request and survives context compaction because it is part of the system prompt, not a one-off session message.
 - On the first agent of a workspace, warns once when a project or preset skill shadows one of the bundled names, naming the copy the model will actually load (provider, source and path). It reports once because every subagent of a session shares the same composition and would only repeat the warning.
 - Maps Claude Code-style tool names onto the DSH tool vocabulary: `Task` → `subagent`, `TodoWrite` → `todo_write`, `Bash`/`Read`/`Write`/`Edit`/`Glob`/`Grep` → their lowercase equivalents, and so on. The mapping also notes that this environment exposes no hook or slash-command API, so an instruction to install a hook or register a command should be carried out with those tools instead.
@@ -59,9 +59,9 @@ Every field is validated against the plugin's own schema (`@deepseek-ai/schemast
 
 ## Requirements
 
-- DeepSeek Harness `^0.1.6-alpha.1` (`engines.dsh`)
+- DeepSeek Harness `^0.1.7-rc.2` (`engines.dsh`)
 - Node `^22.19.0 || >=24.0.0`
-- The peer `@deepseek-ai/cordis ^4.0.2`, plus the optional peers `@deepseek-ai/dsh-skill` and `@deepseek-ai/dsh-system-prompt` (both `^0.1.6-alpha.1`)
+- The peer `@deepseek-ai/cordis ^4.0.4`, plus the optional peers `@deepseek-ai/dsh-skill` and `@deepseek-ai/dsh-system-prompt` (both `^0.1.7-rc.2`)
 - One runtime dependency, `@deepseek-ai/schemastery` (the config schema): a registry install pulls it in, while a `link:` install needs `npm install` in the checkout first or the plugin fails to load
 
 ## Limitations
@@ -70,7 +70,7 @@ Every field is validated against the plugin's own schema (`@deepseek-ai/schemast
 
 Under such a preset:
 
-- The bootstrap is not delivered, so the skills never self-trigger. The 14 skills are still registered on `ctx.skills`, but whether the model can reach them is the preset's decision, because the preset also decides which tools exist — `minimal` exposes only the persistent shell, so no `skill` tool is available there either.
+- The bootstrap is not delivered, so the skills never self-trigger. The 15 skills are still registered on `ctx.skills`, but whether the model can reach them is the preset's decision, because the preset also decides which tools exist — `minimal` exposes only the persistent shell, so no `skill` tool is available there either.
 - `bootstrap: true` cannot make the section appear, and `bootstrap: false` reports nothing: the section was never going to be delivered.
 
 Use a preset whose persona is not complete to get the bootstrap. The limitation is pinned by an executable probe: `verify/src-02-complete-persona-shadow.mjs` mounts the real `SystemPrompt`, `SkillRegistry` and scope machinery, applies this plugin exactly as the loader does, and asserts that a scope with a complete persona delivers that section alone and that no `system-prompt/assemble` listener can put the text back; if the mechanism ever changes, the probe fails and says the documentation is stale.
@@ -88,6 +88,6 @@ node verify/src-02-complete-persona-shadow.mjs   # the complete-persona mechanis
 
 ## License
 
-The skills under `skills/` are vendored unmodified from [obra/superpowers](https://github.com/obra/superpowers) v6.3.0 at commit [`b36e082`](https://github.com/obra/superpowers/commit/b36e0829c6d0140e93cfef2ca599b1b07d4a7797). The exact upstream version, commit and repository are recorded in `package.json`'s `superpowers` field. The optional visual companion in `brainstorming` loads an upstream-hosted logo containing the Superpowers version; it sends no project or prompt content. Set `SUPERPOWERS_DISABLE_TELEMETRY` to a true value to disable it.
+The skills under `skills/` are taken from [obra/superpowers](https://github.com/obra/superpowers) v6.4.2 at commit [`8ca22db`](https://github.com/obra/superpowers/commit/8ca22dba9a94f28898bbce59f2537ff4d87c747d); the exact upstream version, commit and repository are recorded in `package.json`'s `superpowers` field. **The one deviation from upstream is formatting**: `brainstorming/scripts/helper.js`, `brainstorming/scripts/server.cjs`, `systematic-debugging/condition-based-waiting-example.ts` and `writing-skills/render-graphs.js` were reflowed by this repository's prettier (no semantic change, and upstream did not touch them in 6.4.x); every other file is byte-for-byte upstream. The optional visual companion in `brainstorming` loads an upstream-hosted logo containing the Superpowers version; it sends no project or prompt content. Set `SUPERPOWERS_DISABLE_TELEMETRY` to a true value to disable it.
 
 Two MIT license notices apply: the adapter is © its contributors under [LICENSE](LICENSE), while the bundled skills are © Jesse Vincent and the Superpowers contributors under [LICENSE.superpowers](LICENSE.superpowers). The Chinese `README.md` is this package's primary document; this file is its English mirror.

@@ -1,6 +1,6 @@
 # @zfdx123/dsh-superpowers
 
-把 [obra/superpowers](https://github.com/obra/superpowers) 的软件开发方法论接进 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：在 `ctx.skills` 上注册 14 个技能（需求澄清、任务规划、TDD、系统化调试、代码审查等），并把 `using-superpowers` 引导语作为系统提示词段落注入，让它从第一条请求起就生效、在上下文压缩后依然存在。技能是**运行时注册**的、不落盘，所以既不往 `~/.dsh/skills` 复制任何文件，也不要求改动预设或 profile 里的技能目录。当前版本 1.0.0，面向 DSH `^0.1.6-alpha.1`。
+把 [obra/superpowers](https://github.com/obra/superpowers) 的软件开发方法论接进 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：在 `ctx.skills` 上注册 15 个技能（需求澄清、任务规划、TDD、系统化调试、代码审查、会话诊断等），并把 `using-superpowers` 引导语作为系统提示词段落注入，让它从第一条请求起就生效、在上下文压缩后依然存在。技能是**运行时注册**的、不落盘，所以既不往 `~/.dsh/skills` 复制任何文件，也不要求改动预设或 profile 里的技能目录。当前版本 1.0.9，面向 DSH `^0.1.7-rc.2`。
 
 ## 安装
 
@@ -32,7 +32,7 @@ dsh --profile web --dump-config
 
 ## 它做什么
 
-- 在 `ctx.skills` 注册全部 14 个技能。它们出现在技能目录里，并通过原生 `skill` 工具按需加载；`~/.dsh/skills` 不会被写入任何东西。
+- 在 `ctx.skills` 注册全部 15 个技能。它们出现在技能目录里，并通过原生 `skill` 工具按需加载；`~/.dsh/skills` 不会被写入任何东西。
 - 把 `using-superpowers` 注册为 `superpowers:bootstrap` 提示词段落，order 50：位于 persona 前缀（0）之后、计划策略（500）与工具指导（1000+）之前。它在第一条请求就存在，并能在上下文压缩后继续存在——因为它属于系统提示词，而不是一次性会话消息。
 - 每个工作区的首个 agent 创建时，若某个内置技能名被项目技能或预设技能遮蔽，会告警一次，并指明模型实际会加载的那份副本（provider、来源与路径）。只报一次，因为同一会话的子 agent 共享同一套组合，重复告警没有信息量。
 - 把 Claude Code 风格的工具名映射到 DSH 的工具词汇：`Task` → `subagent`、`TodoWrite` → `todo_write`、`Bash`/`Read`/`Write`/`Edit`/`Glob`/`Grep` → 对应的小写工具等。映射里同时说明当前环境不提供 hooks 与斜杠命令 API，所以遇到「安装 hook / 注册斜杠命令」的指令时，应改用这些工具把活干完。
@@ -59,9 +59,9 @@ dsh --profile web --dump-config
 
 ## 前置要求
 
-- DeepSeek Harness `^0.1.6-alpha.1`（`engines.dsh`）
+- DeepSeek Harness `^0.1.7-rc.2`（`engines.dsh`）
 - Node `^22.19.0 || >=24.0.0`
-- peer `@deepseek-ai/cordis ^4.0.2`，以及可选的 peer `@deepseek-ai/dsh-skill`、`@deepseek-ai/dsh-system-prompt`（均为 `^0.1.6-alpha.1`）
+- peer `@deepseek-ai/cordis ^4.0.4`，以及可选的 peer `@deepseek-ai/dsh-skill`、`@deepseek-ai/dsh-system-prompt`（均为 `^0.1.7-rc.2`）
 - 一个运行时依赖 `@deepseek-ai/schemastery`（提供配置 schema）：从 registry 安装会自动带上；用 `link:` 安装需要先在检出目录执行 `npm install`，否则插件加载失败
 
 ## 已知限制
@@ -70,7 +70,7 @@ dsh --profile web --dump-config
 
 在该类预设下：
 
-- bootstrap 不会下发，技能因此不会自动触发。14 个技能仍注册在 `ctx.skills` 上，但模型能否取到它们由预设决定——预设同时决定有哪些工具：`minimal` 只挂常驻 shell，所以那里也没有 `skill` 工具。
+- bootstrap 不会下发，技能因此不会自动触发。15 个技能仍注册在 `ctx.skills` 上，但模型能否取到它们由预设决定——预设同时决定有哪些工具：`minimal` 只挂常驻 shell，所以那里也没有 `skill` 工具。
 - `bootstrap: true` 不会让它出现，`bootstrap: false` 也不会有任何提示：这个段落本来就不会下发。
 
 要拿到 bootstrap，请使用 persona 不是 complete 的预设。这条限制由可执行探针钉住：`verify/src-02-complete-persona-shadow.mjs` 会挂载真实的 `SystemPrompt`、`SkillRegistry` 与 scope 机制、按加载器的方式应用本插件，并断言「带 complete persona 的 scope 只交付它自己，且任何 `system-prompt/assemble` 监听器都补不回来」；机制一旦变化，探针会失败并提示文档已经过期。
@@ -88,6 +88,6 @@ node verify/src-02-complete-persona-shadow.mjs   # 上面那条 complete persona
 
 ## 许可
 
-`skills/` 下的技能原样取自 [obra/superpowers](https://github.com/obra/superpowers) v6.3.0，对应 commit [`b36e082`](https://github.com/obra/superpowers/commit/b36e0829c6d0140e93cfef2ca599b1b07d4a7797)，未做修改；`package.json` 的 `superpowers` 字段记录了确切的上游版本、commit 与仓库地址。`brainstorming` 的可选视觉组件会从上游网站加载带 Superpowers 版本号的 logo，不包含项目或提示词内容；把 `SUPERPOWERS_DISABLE_TELEMETRY` 设为任一 true 值即可关闭。
+`skills/` 下的技能取自 [obra/superpowers](https://github.com/obra/superpowers) v6.4.2，对应 commit [`8ca22db`](https://github.com/obra/superpowers/commit/8ca22dba9a94f28898bbce59f2537ff4d87c747d)；`package.json` 的 `superpowers` 字段记录了确切的上游版本、commit 与仓库地址。**唯一偏离上游的是格式**：`brainstorming/scripts/helper.js`、`brainstorming/scripts/server.cjs`、`systematic-debugging/condition-based-waiting-example.ts`、`writing-skills/render-graphs.js` 这 4 个文件被本仓库的 prettier 重排过（语义未变，上游在 6.4.x 也没动它们），其余文件逐字节同上游。`brainstorming` 的可选视觉组件会从上游网站加载带 Superpowers 版本号的 logo，不包含项目或提示词内容；把 `SUPERPOWERS_DISABLE_TELEMETRY` 设为任一 true 值即可关闭。
 
 这里同时适用两份 MIT 许可声明：适配器版权归其贡献者所有，依据 [LICENSE](LICENSE) 许可；内置技能版权归 Jesse Vincent 与 Superpowers 贡献者所有，依据 [LICENSE.superpowers](LICENSE.superpowers) 许可。中文文档 `README.md` 是本包的主文档，英文版见 [README.en.md](README.en.md)。

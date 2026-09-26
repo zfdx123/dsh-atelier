@@ -201,10 +201,10 @@ mcp:
 | 组件 | 版本要求 |
 |---|---|
 | Node | **`^22.19.0 \|\| >=24.0.0`**（`undici` 8.x 的下限是 22.19.0；`@deepseek-ai/dsh-mcp-client` 依赖 `Promise.withResolvers`） |
-| DSH | **`^0.1.6-alpha.1`**（`engines.dsh` 与 peer 范围；本包按 `0.1.6-alpha.2` 的实际接口逐条核对过，`0.1.6-alpha.1` 亦已核对。`0.1.5` 系列也核对过，但已不在声明范围内） |
-| `@deepseek-ai/dsh-mcp-client` | `^0.1.6-alpha.1`（peerDependency，由运行时提供；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
-| `@deepseek-ai/dsh-settings` | `^0.1.6-alpha.1`（peerDependency，可选：`ctx.settings` 由宿主提供） |
-| `@deepseek-ai/cordis` | `^4.0.2`（peerDependency） |
+| DSH | **`^0.1.7-rc.2`**（`engines.dsh` 与 peer 范围；本包在 1.0.5 那一版按 `0.1.7-rc.2` 的设置 API 重写过，此前按 `0.1.6-alpha.2` 逐条核对过。`0.1.5` / `0.1.6-alpha.*` 系列也已核对，但已不在声明范围内） |
+| `@deepseek-ai/dsh-mcp-client` | `^0.1.7-rc.2`（peerDependency，由运行时提供；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
+| `@deepseek-ai/dsh-settings` | `^0.1.7-rc.2`（peerDependency，可选：`ctx.settings` 由宿主提供） |
+| `@deepseek-ai/cordis` | `^4.0.4`（peerDependency） |
 | `dsh` CLI + pnpm | `dsh plugin` 命令转发给 pnpm；本包按 profile 的 pnpm 布局安装 |
 
 普通依赖：`@deepseek-ai/schemastery`（配置 schema）与 `undici`（`^7.0.0 || ^8.0.0`，只用于按 origin 定制 TLS dispatcher）。客户端界面用外壳自带原生组件（`@deepseek-ai/dsh-client-ui-primitives`），拿不到时逐处降级，不会白屏。
@@ -257,21 +257,21 @@ mcp:
   MCP_LOG_CONTRACT_PRINT=1 node test/log-contract.test.js
   ```
 
-  同时把 `devDependencies` 的 `@deepseek-ai/dsh-mcp-client` 钉在宿主当前版本（`^0.1.6-alpha.2`），让本地测试与线上尽量同源。
+  同时把 `devDependencies` 的 `@deepseek-ai/dsh-mcp-client` 钉在宿主当前版本（`^0.1.7-rc.2`），让本地测试与线上尽量同源。
 
 ### 兼容性
 
 | 组件 | 版本要求 |
 |---|---|
 | Node | **`^22.19.0 \|\| >=24.0.0`** |
-| DSH | **`0.1.6-alpha.2`**（本包按该版本的实际接口逐条核对过；`0.1.6-alpha.1` 亦已核对。`0.1.5` 系列也核对过，但 peer 范围已收紧到 `^0.1.6-alpha.1`，不再是声明支持的版本线） |
-| `@deepseek-ai/dsh-mcp-client` | `^0.1.6-alpha.1`（peerDependency；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
-| `@deepseek-ai/dsh-settings` | `^0.1.6-alpha.1`（peerDependency；`ctx.settings` 由宿主提供） |
-| `@deepseek-ai/cordis` | `^4.0.2` |
+| DSH | **`0.1.7-rc.2`**（本包在 1.0.5 按该版本的设置 API 逐条重写过；`0.1.6-alpha.*` 与 `0.1.5` 系列是更早的校对记录，peer 范围现已收紧到 `^0.1.7-rc.2`） |
+| `@deepseek-ai/dsh-mcp-client` | `^0.1.7-rc.2`（peerDependency；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
+| `@deepseek-ai/dsh-settings` | `^0.1.7-rc.2`（peerDependency；`ctx.settings` 由宿主提供） |
+| `@deepseek-ai/cordis` | `^4.0.4` |
 
-### 历史修复记录（当前版本 1.0.0）
+### 历史修复记录（当前版本 1.0.9）
 
-本包版本已到 **1.0.0**；下面两张表是**历史**版本的修复记录，保留下来是因为它们记录了「代码为什么长这样」。表里引用的 `0.1.5` / `0.1.6-alpha.x` 都是 **DSH 侧**（或 mcp-client 侧）的版本号，不是本包的版本。
+本包版本已到 **1.0.9**；下面两张表是**历史**版本的修复记录，保留下来是因为它们记录了「代码为什么长这样」（表内的版本与 peer 范围是**当时**的，不是当前声明）。表里引用的 `0.1.5` / `0.1.6-alpha.x` 都是 **DSH 侧**（或 mcp-client 侧）的版本号，不是本包的版本。
 
 #### 0.3.4（历史）：按 DSH 0.1.6-alpha.1 的核对结果做的修复
 

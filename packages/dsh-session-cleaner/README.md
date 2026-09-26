@@ -1,6 +1,6 @@
 # @zfdx123/dsh-session-cleaner
 
-给 DSH（DeepSeek Harness）补上**删除会话**的能力——从**运行中**的 web 运行时里删，不需要重启。DSH 只有「归档」：`workspace.archiveSession` 把会话 id 加进一个注册表集合，**文件仍留在磁盘上**；不存在 `session.delete`。本插件补上这个缺口：一次删除会清掉**四个表面**——live store 条目、工作区记账（归档集合与各 workspace 的会话槽）、磁盘产物目录、投影缓存行——并从三个入口暴露出来（侧边栏会话行的 ⋮ 菜单、设置页「会话清理」、一个 HTTP 路由），删除确认框复用 DSH 自己的 UI 原语，与「删除工作区」那个框同款。当前版本 1.0.8，面向 DSH `^0.1.7-rc.2`。
+给 DSH（DeepSeek Harness）补上**删除会话**的能力——从**运行中**的 web 运行时里删，不需要重启。DSH 只有「归档」：`workspace.archiveSession` 把会话 id 加进一个注册表集合，**文件仍留在磁盘上**；不存在 `session.delete`。本插件补上这个缺口：一次删除会清掉**四个表面**——live store 条目、工作区记账（归档集合与各 workspace 的会话槽）、磁盘产物目录、投影缓存行——并从三个入口暴露出来（侧边栏会话行的 ⋮ 菜单、设置页「会话清理」、一个 HTTP 路由），删除确认框复用 DSH 自己的 UI 原语，与「删除工作区」那个框同款。当前版本 1.0.9，面向 DSH `^0.1.7-rc.2`。
 
 ## 安装
 
@@ -124,9 +124,9 @@ await fetch('/api-ext/session.cleaner.diag', {
 
 ## 前置要求
 
-- DeepSeek Harness `^0.1.6-alpha.1`（`engines.dsh`），且是 **web profile**：宿主侧声明 `webServer`、`workspaceRegistry`、`sessions`、`agents`、`storageDomain`，客户端侧要 `slots`/`locale`/`sessions`/`uiWorkspace`
+- DeepSeek Harness `^0.1.7-rc.2`（`engines.dsh`），且是 **web profile**：宿主侧声明 `webServer`、`workspaceRegistry`、`sessions`、`agents`、`storageDomain`，客户端侧要 `slots`/`locale`/`sessions`/`uiWorkspace`
 - Node `^22.19.0 || >=24.0.0`
-- peer `@deepseek-ai/cordis ^4.0.2`；`@deepseek-ai/dsh-agent`、`@deepseek-ai/dsh-host-webserver`、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-workspace` 为可选 peer（都声明为 `^0.1.6-alpha.1`）
+- peer `@deepseek-ai/cordis ^4.0.4`；`@deepseek-ai/dsh-agent`、`@deepseek-ai/dsh-host-webserver`、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-workspace` 为可选 peer（都声明为 `^0.1.7-rc.2`）
 - 会话树的位置由 `DSH_HOME` 决定；插件的 `sessionsRoot()` 与宿主解析规则一致
 
 ## 已知限制

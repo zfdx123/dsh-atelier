@@ -131,7 +131,7 @@ dsh plugin --profile web add @zfdx123/dsh-memery
    memory_* 工具 / 设置页路由 ────┘
 ```
 
-集成点（均按 DSH `^0.1.6-alpha.1` 的运行时契约核实；更早的 0.1.5-rc.1 是历史基线）：
+集成点（均按 DSH `^0.1.7-rc.2` 的运行时契约核实；更早的 0.1.5-rc.1 是历史基线）：
 
 - `ctx.tools.register(ToolDefinition)` —— 六个 `memory_*` 工具；
 - `ctx.on('agent/pre-step', …)` —— waterfall，把快照/命中拼进 `decision.messages`、插到真实用户消息之前；
@@ -156,10 +156,10 @@ dsh plugin --profile web add @zfdx123/dsh-memery
 
 ## 前置要求
 
-- **DSH `^0.1.6-alpha.1`**（`package.json` 的 `engines.dsh`；peer 范围同为 `^0.1.6-alpha.1`）；
+- **DSH `^0.1.7-rc.2`**（`package.json` 的 `engines.dsh`；peer 范围同为 `^0.1.7-rc.2`）；
 - **Node ≥ 22.13**（`node:sqlite` 的免标志下限，理由见「已知限制」）；本仓库整体要求 `^22.19.0 || >=24.0.0`；
 - 装成 **profile bundle**（`dsh.bundle.patch` → `cordis.patch.yml`），并在 `dsh.client.platform: web` 的前端下使用——设置页只在 web 前端出现；
-- peer：`@deepseek-ai/cordis ^4.0.2`、`@deepseek-ai/dsh-llm ^0.1.6-alpha.1`、`@deepseek-ai/dsh-tools ^0.1.6-alpha.1`（最后一个声明为 optional peer）；
+- peer：`@deepseek-ai/cordis ^4.0.4`、`@deepseek-ai/dsh-llm ^0.1.7-rc.2`、`@deepseek-ai/dsh-tools ^0.1.7-rc.2`（最后一个声明为 optional peer）；
 - 不需要任何外部服务、端口、网络或 API key。
 
 ## 已知限制

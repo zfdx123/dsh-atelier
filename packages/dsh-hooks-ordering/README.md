@@ -1,6 +1,6 @@
 # @zfdx123/dsh-hooks-ordering
 
-为 [Cordis](https://github.com/cordiverse/cordis) 钩子提供确定性的 `before`/`after` 排序：钩子的参与者由相互独立、彼此无感知的插件贡献，`waterfall` 与 `serial` 两种派发方式都支持，并附带可选的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 层，开箱即可控制真实的 dsh 钩子。它解决的问题很具体——Cordis 按**注册顺序**派发 waterfall 监听器（也就是它们在内部监听器数组中的位置，`prepend` 是唯一可用的调节手段），而注册顺序又由 `inject` 依赖的激活时机决定，**互不相关的插件之间的激活顺序是不确定的**，于是「认证先于日志、净化器先于序列化器、指标最后执行」这类真正要紧的顺序其实悄悄依赖于没人控制的加载顺序，改一个看似无关的 `inject` 就会翻转。本包**不需要**修改或 fork Cordis：它是一个普通 Cordis 插件，**包住**指定的钩子并自行决定参与者顺序，参与者注册到协调器上（而不是原始钩子），用 `before`/`after` 名字声明约束，再由一个稳定的拓扑排序定序——与插件加载时机无关。当前版本 1.0.1，面向 DSH `^0.1.6-alpha.1`。
+为 [Cordis](https://github.com/cordiverse/cordis) 钩子提供确定性的 `before`/`after` 排序：钩子的参与者由相互独立、彼此无感知的插件贡献，`waterfall` 与 `serial` 两种派发方式都支持，并附带可选的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 层，开箱即可控制真实的 dsh 钩子。它解决的问题很具体——Cordis 按**注册顺序**派发 waterfall 监听器（也就是它们在内部监听器数组中的位置，`prepend` 是唯一可用的调节手段），而注册顺序又由 `inject` 依赖的激活时机决定，**互不相关的插件之间的激活顺序是不确定的**，于是「认证先于日志、净化器先于序列化器、指标最后执行」这类真正要紧的顺序其实悄悄依赖于没人控制的加载顺序，改一个看似无关的 `inject` 就会翻转。本包**不需要**修改或 fork Cordis：它是一个普通 Cordis 插件，**包住**指定的钩子并自行决定参与者顺序，参与者注册到协调器上（而不是原始钩子），用 `before`/`after` 名字声明约束，再由一个稳定的拓扑排序定序——与插件加载时机无关。当前版本 1.0.9，面向 DSH `^0.1.7-rc.2`。
 
 ## 安装
 
@@ -204,9 +204,9 @@ ctx.plugin(HookOrdering, { log: './hooks-ordering-dag.json' })
 
 ## 前置要求
 
-- DeepSeek Harness `^0.1.6-alpha.1`（`engines.dsh`）
+- DeepSeek Harness `^0.1.7-rc.2`（`engines.dsh`）
 - Node `^22.19.0 || >=24.0.0`
-- peer `@deepseek-ai/cordis ^4.0.2`；dsh 层另外声明可选的 peer `@deepseek-ai/dsh-settings ^0.1.6-alpha.1`
+- peer `@deepseek-ai/cordis ^4.0.4`；dsh 层另外声明可选的 peer `@deepseek-ai/dsh-settings ^0.1.7-rc.2`
 - 设置页需要 web profile（`dsh.client.platform = web`）与外壳的客户端组件表；拿不到原生组件时表单逐处降级，但页面本身仍需客户端那一半
 
 ## 已知限制

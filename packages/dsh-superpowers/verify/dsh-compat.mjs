@@ -15,7 +15,7 @@
  */
 
 import { createRequire } from 'node:module'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve as resolvePath } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -45,6 +45,14 @@ function check(label, ok, detail = '') {
 
 const dshManifest = JSON.parse(readFileSync(DSH_PACKAGE, 'utf8'))
 const pluginManifest = JSON.parse(readFileSync(join(PLUGIN_ROOT, 'package.json'), 'utf8'))
+/**
+ * How many skills the vendored tree actually holds. Read from the tree rather
+ * than written down: re-vendoring a newer Superpowers adds or drops a skill
+ * directory, and a hardcoded count turns that into a false incompatibility.
+ */
+const expectedSkills = readdirSync(join(PLUGIN_ROOT, 'skills'), { withFileTypes: true }).filter((entry) =>
+  entry.isDirectory(),
+).length
 
 process.stdout.write(`\ndsh-superpowers compatibility probe\n`)
 process.stdout.write(`  plugin      ${pluginManifest.name}@${pluginManifest.version}\n`)
@@ -101,7 +109,7 @@ const bundled = registered.filter((skill) => skill.source === 'bundled')
 
 check(
   'ctx.skills.register() accepted every bundled skill (no throw, no skip)',
-  bundled.length === 14,
+  bundled.length === expectedSkills,
   `${bundled.length} skills registered with source "bundled"`,
 )
 
@@ -143,7 +151,7 @@ plugin.apply(quietCtx, { bootstrap: false })
 const quietAssembly = await quietCtx.systemPrompt.assemble()
 check(
   'the documented `config: { bootstrap: false }` override still works',
-  (await quietCtx.skills.list()).filter((skill) => skill.source === 'bundled').length === 14 &&
+  (await quietCtx.skills.list()).filter((skill) => skill.source === 'bundled').length === expectedSkills &&
     !quietAssembly.sections.some((entry) => entry.name === 'superpowers:bootstrap'),
   `skills=${(await quietCtx.skills.list()).length}, sections=${quietAssembly.sections.map((s) => s.name).join(' | ')}`,
 )
@@ -263,7 +271,7 @@ await settle(async () => false, 60)
 const skillsBeforeSecondService = (await mounted.skills.list()).length
 
 new SystemPrompt(mounted, { includeHarnessIdentity: false })
-const appliedAfterBothServices = await settle(async () => (await mounted.skills.list()).length === 14)
+const appliedAfterBothServices = await settle(async () => (await mounted.skills.list()).length === expectedSkills)
 
 check(
   'cordis defers this plugin until BOTH injected services exist, then applies it',

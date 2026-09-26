@@ -61,8 +61,8 @@
     }
   },
   "superpowers": {
-    "upstreamVersion": "6.3.0",
-    "upstreamCommit": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+    "upstreamVersion": "6.4.2",
+    "upstreamCommit": "8ca22dba9a94f28898bbce59f2537ff4d87c747d",
     "upstreamRepository": "https://github.com/obra/superpowers"
   }
 }

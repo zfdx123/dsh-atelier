@@ -104,8 +104,8 @@ test('registers all vendored skills with source-accurate metadata', async () => 
     .filter((entry) => entry.isDirectory())
     .sort((left, right) => left.name.localeCompare(right.name))
 
-  assert.equal(entries.length, 14)
-  assert.equal(state.registered.length, 14)
+  assert.equal(entries.length, 15)
+  assert.equal(state.registered.length, 15)
   assert.deepEqual(state.warnings, [])
   assert.equal(state.sections.length, 1)
   assert.match(state.sections[0].text, /`interrupt_agent`/)
@@ -310,6 +310,30 @@ test('keeps the English and Chinese READMEs structurally in sync', async () => {
       `README.en.md and README.md disagree on ${pattern}`,
     )
   }
+})
+
+test('records the vendored upstream revision in the manifest and both READMEs', async () => {
+  const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
+  const upstream = manifest.superpowers
+  assert.notEqual(upstream, undefined, 'package.json must record the vendored upstream revision')
+  assert.match(upstream.upstreamVersion, /^\d+\.\d+\.\d+$/)
+  assert.match(upstream.upstreamCommit, /^[0-9a-f]{40}$/)
+  assert.equal(upstream.upstreamRepository, 'https://github.com/obra/superpowers')
+
+  const [chinese, english] = await Promise.all(
+    ['README.md', 'README.en.md'].map((file) => readFile(join(packageRoot, file), 'utf8')),
+  )
+  for (const [file, text] of [['README.md', chinese], ['README.en.md', english]]) {
+    assert.ok(text.includes(upstream.upstreamVersion), `${file} should name the vendored upstream version`)
+    assert.ok(text.includes(upstream.upstreamCommit), `${file} should link the vendored upstream commit`)
+  }
+
+  // The advertised skill count is a user-visible claim: keep it tied to the tree.
+  const shipped = (await readdir(join(packageRoot, 'skills'), { withFileTypes: true })).filter((entry) =>
+    entry.isDirectory(),
+  ).length
+  assert.equal(Number(/注册\s*(\d+)\s*个技能/.exec(chinese)?.[1]), shipped, 'README.md should count the shipped skills')
+  assert.equal(Number(/registers\s*(\d+)\s*skills/.exec(english)?.[1]), shipped, 'README.en.md should count the shipped skills')
 })
 
 test('ships every path its test script and manifest reference', async () => {

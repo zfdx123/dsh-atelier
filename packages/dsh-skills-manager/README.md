@@ -215,10 +215,10 @@ dsh plugin --profile web add @zfdx123/dsh-skills-manager
 
 ## 前置要求
 
-- **DSH `^0.1.6-alpha.1`**（`package.json` 的 `engines.dsh`；`dsh-settings` / `dsh-tools` 两个 peer 的范围同为 `^0.1.6-alpha.1`）；
+- **DSH `^0.1.7-rc.2`**（`package.json` 的 `engines.dsh`；`dsh-settings` / `dsh-tools` 两个 peer 的范围同为 `^0.1.7-rc.2`）；
 - **Node ≥ 22**（`engines.node`）；
 - 装成 **profile bundle**（`dsh.bundle.patch` → `cordis.patch.yml`），并在 `dsh.client.platform: web` 的前端下使用——设置页整页与侧栏入口都只在 web 前端出现；
-- peer：`@deepseek-ai/cordis ^4.0.2`（必需）、`@deepseek-ai/dsh-settings ^0.1.6-alpha.1`（optional）、`@deepseek-ai/dsh-tools ^0.1.6-alpha.1`（optional）；
+- peer：`@deepseek-ai/cordis ^4.0.4`（必需）、`@deepseek-ai/dsh-settings ^0.1.7-rc.2`（optional）、`@deepseek-ai/dsh-tools ^0.1.7-rc.2`（optional）；
 - 运行时依赖 `@deepseek-ai/schemastery ^3.18.1`（`settings.register` 的 schema 必须是可调用的 schemastery 对象，所以它是**运行时**依赖，锁文件里必须有；`test/manifest.test.js` 会核对）；
 - `settings` 服务是**硬依赖**（`inject = ['settings']`），因为它提供可配置的技能根目录；
 - 不需要任何外部服务、端口、网络或 API key。
