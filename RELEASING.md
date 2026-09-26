@@ -2,7 +2,7 @@
 
 ## 版本规则
 
-**7 个插件共用一个版本号**（当前 `1.0.5`），`scripts/release-check.mjs` 会强制这一点
+**7 个插件共用一个版本号**（当前 `1.0.6`），`scripts/release-check.mjs` 会强制这一点
 ——每个 `packages/*/package.json` 的 `version` 必须**等于** `PLUGIN_VERSION`。
 meta 包 `@zfdx123/dsh-atelier` 的 7 个依赖也必须写成 `^<插件版本>`。
 
@@ -63,15 +63,25 @@ node scripts/publish-local.mjs                # 其余全部（含入口包，�
 ## 日常发布（打 tag → 暂存 → 你批准）
 
 ```sh
-git tag v1.0.5
-git push origin v1.0.5
+git tag -a v1.0.6 -m "v1.0.6: …"
+git push origin v1.0.6
 ```
 
 > **tag 打的是插件版本**，不是入口包版本。发布作业逐个比对
 > `packages/*/package.json` 的 `version` 与 tag：等于 tag 的进暂存区，其余
-> 打印为「已发布，跳过」。所以 7 个插件在 `1.0.5`、入口包在 `1.0.6` 时，
-> `v1.0.5` 只发那 7 个；入口包等它自己那一版再打一个 tag（重复打 tag 是安全的，
+> 打印为「已发布，跳过」。所以 7 个插件在 `1.0.6`、入口包在 `1.0.7` 时，
+> `v1.0.6` 只发那 7 个；入口包等它自己那一版再打一个 tag（重复打 tag 是安全的，
 > 已发布的会被跳过）。
+>
+> ⚠️ **打 tag 前确认这个 tag 不存在**。远端已有同名 tag 时 `git push origin vX.Y.Z`
+> 会静默什么都不做（看起来像成功），CI 也就不会重跑——实测踩过：`v1.0.5` 早已指向
+> 「升版到 1.0.4」那次提交。稳妥做法是先 `git ls-remote --tags origin 'refs/tags/vX.Y.Z*'`
+> 看一眼；确实要重打就先删远端再推：
+>
+> ```sh
+> git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z
+> git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z
+> ```
 
 `.github/workflows/release.yml` 会：
 

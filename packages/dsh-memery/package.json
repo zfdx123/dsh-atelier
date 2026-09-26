@@ -1,6 +1,6 @@
 {
   "name": "@zfdx123/dsh-memery",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "自包含跨会话记忆插件：node:sqlite 工作区记忆库 + 首轮注入/每轮关键词命中 + memory_* 工具 + 设置页记忆浏览器。无外部服务依赖。",
   "license": "MIT",
   "homepage": "https://github.com/zfdx123/dsh-atelier/tree/main/packages/dsh-memery#readme",
