@@ -1,6 +1,6 @@
 {
   "name": "@zfdx123/dsh-codegraph",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "DSH 代码知识图谱：把 codegraph CLI 包成原生 codegraph_* 工具（core 面 status/init/sync/explore；full 面再加 query/node/files/callers/callees/impact/affected/index/uninit），并用提示前置钩子把结构化上下文推进结构化提问，让代理无需 grep 即可建立、维护、查询预索引的代码图谱。",
   "license": "MIT",
   "author": "zfdx123 <2915441170@qq.com>",

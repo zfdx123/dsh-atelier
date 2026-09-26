@@ -1,6 +1,6 @@
 {
   "name": "@zfdx123/dsh-superpowers",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Superpowers（移植自 obra/superpowers）：把整套软件开发方法论技能与会话引导语作为 dsh 插件提供，技能在运行时注册，首轮对话自动注入引导。",
   "license": "MIT",
   "author": "zfdx123",

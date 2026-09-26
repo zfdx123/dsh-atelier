@@ -1,6 +1,6 @@
 # @zfdx123/dsh-session-cleaner
 
-给 DSH（DeepSeek Harness）补上**删除会话**的能力——从**运行中**的 web 运行时里删，不需要重启。DSH 只有「归档」：`workspace.archiveSession` 把会话 id 加进一个注册表集合，**文件仍留在磁盘上**；不存在 `session.delete`。本插件补上这个缺口：一次删除会清掉**四个表面**——live store 条目、工作区记账（归档集合与各 workspace 的会话槽）、磁盘产物目录、投影缓存行——并从三个入口暴露出来（侧边栏会话行的 ⋮ 菜单、设置页「会话清理」、一个 HTTP 路由），删除确认框复用 DSH 自己的 UI 原语，与「删除工作区」那个框同款。当前版本 1.0.0，面向 DSH `^0.1.6-alpha.1`。
+给 DSH（DeepSeek Harness）补上**删除会话**的能力——从**运行中**的 web 运行时里删，不需要重启。DSH 只有「归档」：`workspace.archiveSession` 把会话 id 加进一个注册表集合，**文件仍留在磁盘上**；不存在 `session.delete`。本插件补上这个缺口：一次删除会清掉**四个表面**——live store 条目、工作区记账（归档集合与各 workspace 的会话槽）、磁盘产物目录、投影缓存行——并从三个入口暴露出来（侧边栏会话行的 ⋮ 菜单、设置页「会话清理」、一个 HTTP 路由），删除确认框复用 DSH 自己的 UI 原语，与「删除工作区」那个框同款。当前版本 1.0.8，面向 DSH `^0.1.7-rc.2`。
 
 ## 安装
 
