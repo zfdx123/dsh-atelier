@@ -2,7 +2,7 @@
 
 ## 版本规则
 
-**7 个插件共用一个版本号**（当前 `1.0.6`），`scripts/release-check.mjs` 会强制这一点
+**7 个插件共用一个版本号**（当前 `1.0.7`），`scripts/release-check.mjs` 会强制这一点
 ——每个 `packages/*/package.json` 的 `version` 必须**等于** `PLUGIN_VERSION`。
 meta 包 `@zfdx123/dsh-atelier` 的 7 个依赖也必须写成 `^<插件版本>`。
 
@@ -63,15 +63,22 @@ node scripts/publish-local.mjs                # 其余全部（含入口包，�
 ## 日常发布（打 tag → 暂存 → 你批准）
 
 ```sh
-git tag -a v1.0.6 -m "v1.0.6: …"
-git push origin v1.0.6
+git tag -a v1.0.7 -m "v1.0.7: …"
+git push origin v1.0.7
 ```
 
 > **tag 打的是插件版本**，不是入口包版本。发布作业逐个比对
 > `packages/*/package.json` 的 `version` 与 tag：等于 tag 的进暂存区，其余
-> 打印为「已发布，跳过」。所以 7 个插件在 `1.0.6`、入口包在 `1.0.7` 时，
-> `v1.0.6` 只发那 7 个；入口包等它自己那一版再打一个 tag（重复打 tag 是安全的，
-> 已发布的会被跳过）。
+> 打印为「已发布，跳过」。所以 7 个插件在 `1.0.7`、入口包在 `1.0.8` 时，
+> `v1.0.7` 只发那 7 个；入口包等它自己那一版再打一个 tag。
+>
+> ⚠️ **「重复打 tag 是安全的」是错的**——踩过。发布作业的判据是
+> 「registry 上有没有这个版本」，所以：
+> - 版本**已发布**（哪怕是你刚批准的那一版）→ 打印 `already published` 跳过，
+>   重新打 tag **不会**用新提交重新 stage。
+> - 想改已发布版本的内容，只能**升版本号**再打新 tag。已经发出去的 1.0.6
+>   是改不动的——这就是 1.0.7 存在的原因。
+> - 版本只在**暂存区**（还没批准）时重新 stage 才会被覆盖；一旦批准就冻结。
 >
 > ⚠️ **打 tag 前确认这个 tag 不存在**。远端已有同名 tag 时 `git push origin vX.Y.Z`
 > 会静默什么都不做（看起来像成功），CI 也就不会重跑——实测踩过：`v1.0.5` 早已指向
@@ -82,6 +89,10 @@ git push origin v1.0.6
 > git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z
 > git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z
 > ```
+>
+> ⚠️ **批准暂存区之前，先确认暂存的是哪个提交**。发布作业日志里每个包都会打印
+> `staged with id …`；如果那一版的代码不是你要的（例如你在批准前又推了修复），
+> **升版本号重来**，不要指望重打 tag 覆盖。
 
 `.github/workflows/release.yml` 会：
 

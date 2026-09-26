@@ -1,6 +1,6 @@
 {
   "name": "@zfdx123/dsh-skills-manager",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "DSH 技能管理器：诊断、新建、编辑、开关、搬运磁盘上的技能（SKILL.md），补上官方 provider 静默跳过坏文件的那半边，并给模型一个 skill_manager 工具",
   "license": "MIT",
   "homepage": "https://github.com/zfdx123/dsh-atelier/tree/main/packages/dsh-skills-manager#readme",
