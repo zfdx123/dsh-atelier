@@ -56,10 +56,10 @@ function fakePrimitives() {
     Tag: make('Tag'),
     StateDot: make('StateDot'),
     RiskConfirmation: make('RiskConfirmation'),
-    IconPlusOutline16: make('IconPlusOutline16'),
-    IconRefreshOutline16: make('IconRefreshOutline16'),
-    IconEditOutline16: make('IconEditOutline16'),
-    IconTrashOutline16: make('IconTrashOutline16'),
+    IconPlusOutline: make('IconPlusOutline'),
+    IconRefreshOutline: make('IconRefreshOutline'),
+    IconEditOutline: make('IconEditOutline'),
+    IconTrashOutline: make('IconTrashOutline'),
   }
 }
 
@@ -985,13 +985,13 @@ describe('按钮图标：外壳原生图标走 Button 的 icon 槽（降级路�
   // 它——按同一性断言「icon 槽里就是外壳那个图标组件」才是真正的证据。
   const iconOf = (kit, tree, text) => withText(kit, tree, text).props.icon
 
-  it('kit 路径：「添加服务器」用原生 IconPlusOutline16，文案里不再带全角 ＋', () => {
+  it('kit 路径：「添加服务器」用原生 IconPlusOutline，文案里不再带全角 ＋', () => {
     const kit = fakePrimitives()
     const mod = loadClientBundle({ primitives: kit })
     const tree = mod.McpSection({})
     const add = withText(kit, tree, '添加服务器')
     assert.ok(add, 'kit 路径的按钮文案应是字典里不带字形的那条')
-    assert.equal(iconOf(kit, tree, '添加服务器').type, kit.IconPlusOutline16, 'icon 槽里是外壳的原生加号')
+    assert.equal(iconOf(kit, tree, '添加服务器').type, kit.IconPlusOutline, 'icon 槽里是外壳的原生加号')
     assert.equal(
       collectText(tree).some((text) => text.includes('＋')),
       false,
@@ -999,26 +999,26 @@ describe('按钮图标：外壳原生图标走 Button 的 icon 槽（降级路�
     )
   })
 
-  it('kit 路径：刷新走原生 IconRefreshOutline16（刷新文案本来就不带字形）', () => {
+  it('kit 路径：刷新走原生 IconRefreshOutline（刷新文案本来就不带字形）', () => {
     const kit = fakePrimitives()
     const mod = loadClientBundle({ primitives: kit })
     const refresh = withText(kit, mod.McpSection({}), '刷新')
     assert.ok(refresh, '刷新按钮文案不变')
-    assert.equal(iconOf(kit, mod.McpSection({}), '刷新').type, kit.IconRefreshOutline16)
+    assert.equal(iconOf(kit, mod.McpSection({}), '刷新').type, kit.IconRefreshOutline)
   })
 
   it('kit 路径：行内「编辑 / 删除」也走原生图标', () => {
     const kit = fakePrimitives()
     const mod = loadClientBundle({ primitives: kit })
     const tree = mod.ServerRow(rowProps())
-    assert.equal(iconOf(kit, tree, '编辑').type, kit.IconEditOutline16)
-    assert.equal(iconOf(kit, tree, '删除').type, kit.IconTrashOutline16)
+    assert.equal(iconOf(kit, tree, '编辑').type, kit.IconEditOutline)
+    assert.equal(iconOf(kit, tree, '删除').type, kit.IconTrashOutline)
     assert.equal(textOf(withText(kit, tree, '删除')), '删除', '字形只由图标画，文案就是动作词')
   })
 
   it('部分降级（有 Button 但没有加号图标）：退回带字形的文案，按钮不空', () => {
     const kit = fakePrimitives()
-    delete kit.IconPlusOutline16
+    delete kit.IconPlusOutline
     const mod = loadClientBundle({ primitives: kit })
     const tree = mod.McpSection({})
     const add = withText(kit, tree, '＋ 添加服务器')

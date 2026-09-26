@@ -1023,12 +1023,18 @@ section('8b) structural prompt on an indexed project \u2192 plugin-sourced conte
     if (entry.role === 'user' && entry.id) ok('steered message is a valid user-role message (id + role)')
     else bad('steered message malformed')
     // The load-bearing assertion: machine-injected context must declare a
-    // plugin source, not forge a user prompt.
+    // producer-owned plugin source, not forge a user prompt. The kind must not
+    // be the retired v3 wrapper `'plugin'`: session format v4 refuses that at
+    // admission ("format v4 message requires a producer-owned source kind"),
+    // which fails the whole send.
     const source = entry.source || {}
-    if (source.kind === 'plugin' && source.plugin === 'dsh-codegraph') {
-      ok('steered context declares source kind "plugin"', `plugin=${source.plugin}`)
+    if (source.kind === 'plugin:dsh-codegraph') {
+      ok('steered context declares a producer-owned source kind', `kind=${source.kind}`)
     } else {
-      bad('steered context must not forge a user source', `got source.kind=${JSON.stringify(source.kind)}`)
+      bad(
+        'steered context must declare source kind "plugin:dsh-codegraph" (never a forged user source, never the retired "plugin")',
+        `got source.kind=${JSON.stringify(source.kind)}`,
+      )
     }
     if (source.form === 'notice' && typeof source.summary === 'string' && source.summary.length > 0) {
       ok('steered context carries the notice form + summary', source.summary.slice(0, 60))
@@ -1087,8 +1093,7 @@ section('8d) gates: non-structural, unindexed, own output, non-user sources')
     [
       'plugin-sourced prompt',
       makeAgent(FIXTURE_DIR, 'multiply \u7684\u8c03\u7528\u6d41\u7a0b\u662f\u600e\u6837\u7684\uff1f', 'fl-5', {
-        kind: 'plugin',
-        plugin: 'other-plugin',
+        kind: 'plugin:other-plugin',
       }),
     ],
   ]

@@ -149,9 +149,9 @@ window.__ModuleLoader__.load({
         if (
           typeof primitives?.Modal === 'function' &&
           typeof primitives?.Button === 'function' &&
-          typeof primitives?.IconSearchOutline16 === 'function' &&
-          typeof primitives?.IconChevronDownOutline14 === 'function' &&
-          typeof primitives?.IconTrashOutline16 === 'function'
+          typeof primitives?.IconSearchOutline === 'function' &&
+          typeof primitives?.IconChevronDownOutline === 'function' &&
+          typeof primitives?.IconTrashOutline === 'function'
         )
           return primitives
       } catch (error) {
@@ -701,7 +701,7 @@ window.__ModuleLoader__.load({
               React.createElement(Glyph, {
                 key: 'chevron',
                 primitives,
-                name: 'IconChevronDownOutline14',
+                name: 'IconChevronDownOutline',
                 size: 12,
                 box: Object.assign({}, S.chevron, collapsed ? S.chevronFolded : {}),
                 fallback: ChevronIcon,
@@ -723,7 +723,7 @@ window.__ModuleLoader__.load({
           React.createElement(Glyph, {
             key: 'i',
             primitives,
-            name: 'IconSearchOutline16',
+            name: 'IconSearchOutline',
             size: 16,
             box: S.searchGlyph,
             fallback: SearchIcon,
@@ -981,7 +981,7 @@ window.__ModuleLoader__.load({
      * root mounted behind it. Null keeps the hand-drawn SVG above in charge.
      */
     function kitTrashIcon(primitives) {
-      const Icon = kitIcon(primitives, 'IconTrashOutline16')
+      const Icon = kitIcon(primitives, 'IconTrashOutline')
       if (Icon === null) return null
       try {
         const scratch = document.createElement('span')
@@ -992,7 +992,7 @@ window.__ModuleLoader__.load({
         root.unmount()
         return node
       } catch (error) {
-        report('icon-fallback', { icon: 'IconTrashOutline16', message: String(error?.message ?? error) })
+        report('icon-fallback', { icon: 'IconTrashOutline', message: String(error?.message ?? error) })
         return null
       }
     }

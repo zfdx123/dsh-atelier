@@ -10,6 +10,8 @@ import assert from 'node:assert/strict'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context, Service } from '@deepseek-ai/cordis'
+import Schema from '@deepseek-ai/schemastery'
+import { createVolatile, updateVolatile } from '@deepseek-ai/cosmokit'
 import * as Manager from '../index.js'
 import { CONFIRM_TIMEOUT_MS } from '../index.js'
 import { createTlsMcpServer } from '../fixtures/tls-mcp-server.mjs'
@@ -17,52 +19,69 @@ import { createTlsMcpServer } from '../fixtures/tls-mcp-server.mjs'
 // 测试证书本身即该服务器证书，所以把它当 CA 用可以真正完成校验（不是关闭校验）。
 const CA_FILE = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'tls', 'localhost-cert.pem')
 
-// 最小 settings 服务（register/get/replace/describe）——与 test/e2e.test.js 同形。
+/** 测试用的 profile 条目 id（0.1.7 的表单按它定位）。 */
+const TEST_ENTRY_ID = 'mcp-manager'
+
+/**
+ * 造一个 volatile 配置引用，与 Loader 交给插件的完全同构（真正走
+ * `ServersSchema.resolve`，默认值已按 schema 补齐）。
+ */
+function volatileServersRef(initial = []) {
+  const ref = Schema.resolve({ servers: initial }, Manager.Config, {})[0].servers
+  if (!isVolatile(ref)) throw new Error('volatileServersRef: ServersSchema.servers 应当是 volatile 引用')
+  return ref
+}
+
+/** 按 Loader 的 `updateVolatile` 语义把新值就地写进引用。 */
+function writeServersRef(ref, servers) {
+  updateVolatile(ref, createVolatile(Schema.resolve({ servers }, Manager.Config, {})[0].servers.get()))
+}
+
+// 最小 settings 服务，按 DSH 0.1.7 契约：表单按 **loader 条目 id** 定位
+// （不再有 register(ns, schema)），describe() 报告条目，replace() 写入并把
+// 新值就地写进 volatile 引用（updateVolatile 语义）后发出 loader/volatile-update。
 class FakeSettings extends Service {
-  registrations = new Map()
-  document = {}
+  /** @type {Map<string, {ns: string, document: unknown, revision: number, ref: object|null}>} */
+  entries = new Map()
 
   constructor(ctx) {
     super(ctx, 'settings')
   }
 
-  register(ns, schema) {
-    const registration = { ns, schema, resolved: schema(this.document[ns]), revision: 0 }
-    this.ctx.effect(
-      () => {
-        this.registrations.set(ns, registration)
-        return () => this.registrations.delete(ns)
-      },
-      `settings.register(${JSON.stringify(ns)})`,
-    )
-    return { get: () => registration.resolved, replace: (section) => this.replace(ns, section) }
+  /**
+   * 登记一个条目，引用取 Loader 真正交给插件的那一个
+   * （`fiber.config.servers`，由 cordis 从**原始** config 解析出来的引用）。
+   */
+  adopt(ns, ref) {
+    this.entries.set(ns, { ns, document: ref.get(), revision: 0, ref })
   }
-
-  get(ns) {
-    return this.registrations.get(ns)?.resolved
-  }
-
   describe() {
-    return [...this.registrations.values()].map((r) => ({ ns: r.ns, revision: r.revision }))
+    return [...this.entries.values()].map((entry) => ({
+      ns: entry.ns,
+      value: entry.document,
+      revision: entry.revision,
+      autoGenerate: true,
+      applies: 'live',
+    }))
   }
 
   async replace(ns, section, expectedRevision) {
-    const registration = this.registrations.get(ns)
-    if (!registration) throw new Error(`settings namespace "${ns}" is not registered`)
-    if (expectedRevision !== undefined && expectedRevision !== registration.revision) {
+    const entry = this.entries.get(ns)
+    if (entry === undefined) throw new Error(`settings entry "${ns}" does not exist`)
+    if (expectedRevision !== undefined && expectedRevision !== entry.revision) {
       const error = new Error('settings conflict')
+      error.name = 'SettingsConflictError'
       error.code = 'SETTINGS_CONFLICT'
       throw error
     }
-    const before = this.document[ns]
-    this.document[ns] = section
-    const next = registration.schema(section)
-    if (JSON.stringify(before) !== JSON.stringify(section)) registration.revision += 1
-    if (JSON.stringify(next) !== JSON.stringify(registration.resolved)) {
-      registration.resolved = next
-      this.ctx.emit('settings/updated', ns, next)
+    entry.document = section
+    entry.revision += 1
+    this.ctx.emit('settings/document-updated', ns, entry.revision)
+    if (entry.ref !== null && entry.ref !== undefined) {
+      writeServersRef(entry.ref, section.servers ?? [])
+      this.ctx.emit('loader/volatile-update', [[]])
     }
-    return next
+    return entry.document
   }
 }
 
@@ -163,7 +182,7 @@ describe('端到端：自签名 HTTPS MCP 服务器（tlsInsecure 定向生效�
 
   /** 把一台服务器配置进去、等状态不再是「连接中」，读回设置页拿到的 status。 */
   const mountAndRead = async (name, url, extra = {}) => {
-    await settings.replace('mcp', { servers: [server({ serverName: name, url, ...extra })] })
+    await settings.replace(TEST_ENTRY_ID, { servers: [server({ serverName: name, url, ...extra })] })
     const deadline = Date.now() + CONFIRM_TIMEOUT_MS + 4000
     for (;;) {
       const { body } = await web.get('/api/mcp/servers')
@@ -182,9 +201,11 @@ describe('端到端：自签名 HTTPS MCP 服务器（tlsInsecure 定向生效�
     web = new FakeWebServer(app)
     logs = []
     app.logger.exporter({ levels: { default: 3 }, export: (message) => logs.push(message) })
-    disposer = app.plugin(Manager)
-    // 让插件的 apply 跑完（settings 命名空间注册 + 启动同步）
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    // config 传原始数组，volatile 引用由 cordis 解析出来（与 Loader 一致）
+    disposer = app.plugin(Manager, { servers: [], entryId: TEST_ENTRY_ID })
+    // 让插件的 apply 跑完（路由注册 + 启动同步）
+    await disposer.await()
+    settings.adopt(TEST_ENTRY_ID, disposer.config.servers)
   })
 
   after(async () => {
@@ -193,7 +214,7 @@ describe('端到端：自签名 HTTPS MCP 服务器（tlsInsecure 定向生效�
   })
 
   it('对照组：不信任自签名证书时连接失败，工具不注册', async () => {
-    await settings.replace('mcp', { servers: [server({ url: mcp.url })] })
+    await settings.replace(TEST_ENTRY_ID, { servers: [server({ url: mcp.url })] })
 
     const error = await waitFor(
       () =>
@@ -208,7 +229,7 @@ describe('端到端：自签名 HTTPS MCP 服务器（tlsInsecure 定向生效�
   })
 
   it('开 tlsInsecure 后同一台服务器挂载成功，工具注册', async () => {
-    await settings.replace('mcp', { servers: [server({ url: mcp.url, tlsInsecure: true })] })
+    await settings.replace(TEST_ENTRY_ID, { servers: [server({ url: mcp.url, tlsInsecure: true })] })
 
     await waitFor(() => tools.defs.has('mcp__tls__echo'), { label: 'mcp__tls__echo 注册' })
     assert.equal(tools.defs.get('mcp__tls__echo').name, 'mcp__tls__echo')
@@ -220,7 +241,7 @@ describe('端到端：自签名 HTTPS MCP 服务器（tlsInsecure 定向生效�
     // 以「工具被重新注册过」为准，而不是「工具还在」——否则老实例没卸载干净
     // 也能让断言通过。
     const before = tools.registerCount
-    await settings.replace('mcp', {
+    await settings.replace(TEST_ENTRY_ID, {
       servers: [server({ url: mcp.url, tlsInsecure: false, tlsCaFile: CA_FILE })],
     })
     await waitFor(() => tools.registerCount > before && tools.defs.has('mcp__tls__echo'), {
@@ -231,14 +252,14 @@ describe('端到端：自签名 HTTPS MCP 服务器（tlsInsecure 定向生效�
 
   it('移除服务器后策略释放：globalThis.fetch 被还原、工具注销', async () => {
     assert.notEqual(globalThis.fetch, originalFetch, '挂载期间应处于分流状态')
-    await settings.replace('mcp', { servers: [] })
+    await settings.replace(TEST_ENTRY_ID, { servers: [] })
     await waitFor(() => !tools.defs.has('mcp__tls__echo'), { label: '工具注销' })
     await waitFor(() => globalThis.fetch === originalFetch, { label: 'fetch 还原' })
     assert.equal(globalThis.fetch, originalFetch)
   })
 
   it('CA 文件不存在 → 挂载失败并给出可读原因，不静默连不上', async () => {
-    await settings.replace('mcp', {
+    await settings.replace(TEST_ENTRY_ID, {
       servers: [server({ url: mcp.url, tlsCaFile: join(dirname(CA_FILE), 'nope.pem') })],
     })
     const error = await waitFor(
@@ -259,9 +280,9 @@ describe('端到端：自签名 HTTPS MCP 服务器（tlsInsecure 定向生效�
   // 当成「已挂载」，卡片就会在服务器根本没回应时长时间亮绿。
   describe('没有证据就不亮绿', () => {
     it('确实连上了（工具注册）→ 转成 ok', async () => {
-      await settings.replace('mcp', { servers: [] })
+      await settings.replace(TEST_ENTRY_ID, { servers: [] })
       await new Promise((resolve) => setTimeout(resolve, 200))
-      await settings.replace('mcp', { servers: [server({ serverName: 'confirmed', url: mcp.url, tlsInsecure: true })] })
+      await settings.replace(TEST_ENTRY_ID, { servers: [server({ serverName: 'confirmed', url: mcp.url, tlsInsecure: true })] })
       await waitFor(() => tools.defs.has('mcp__confirmed__echo'), { label: '工具注册' })
 
       const { body } = await web.get('/api/mcp/servers')
@@ -311,9 +332,9 @@ describe('端到端：自签名 HTTPS MCP 服务器（tlsInsecure 定向生效�
         // 若实现是「窗口直接盖住状态」，用户就只会看到「未确认」；正确实现必须
         // 让随后到达的真实失败原因把它顶掉。
         process.env.DSH_MCP_MANAGER_CONFIRM_MS = '9000'
-        await settings.replace('mcp', { servers: [] })
+        await settings.replace(TEST_ENTRY_ID, { servers: [] })
         await new Promise((resolve) => setTimeout(resolve, 200))
-        await settings.replace('mcp', {
+        await settings.replace(TEST_ENTRY_ID, {
           servers: [server({ serverName: 'hole', url: 'https://192.0.2.1:8091/mcp', tlsInsecure: true })],
         })
 

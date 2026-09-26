@@ -18,7 +18,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import HookOrdering from './waterfall.ts'
 import { SerialHookOrdering } from './serial.ts'
-import { type HooksOrderingSettings, resolveSettings } from './settings.ts'
+import { type HooksOrderingSettings, hooksOrderingConfig, readSetting } from './settings.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'hooks-ordering'
@@ -108,8 +108,27 @@ export const DEFAULT_SYNC_RETURN_HOOKS: readonly string[] = [
 /** The dsh serial hook controlled by default. */
 export const DEFAULT_SERIAL_HOOKS: readonly string[] = ['agent/turn-stopping']
 
-/** Plugin config. */
-export interface Config {
+/**
+ * This plugin's Cordis Config schema.
+ *
+ * Since DSH 0.1.7 this *is* the Settings page: the fields are `.volatile()`, so
+ * the settings service projects exactly them into an editable form and commits
+ * an edit into the live reference rather than remounting the plugin. The
+ * defaults are the real hook sets below, so an entry whose `config:` key is
+ * empty resolves to them.
+ */
+export const Config = hooksOrderingConfig(DEFAULT_WATERFALL_HOOKS, DEFAULT_SERIAL_HOOKS)
+
+/** The same schema under its pre-0.1.7 name. */
+export const HooksOrderingConfig = Config
+
+/**
+ * Plugin config as a plain value.
+ *
+ * A loader-resolved config carries the volatile fields as references instead of
+ * plain arrays, so this describes the *plain* shape callers and tests construct.
+ */
+export interface ConfigShape {
   /**
    * Waterfall hooks to control. Defaults to {@link DEFAULT_WATERFALL_HOOKS}.
    * Pass `[]` to disable the waterfall service entirely.
@@ -125,10 +144,16 @@ export interface Config {
    * therefore refuse participants. Defaults to {@link DEFAULT_SYNC_RETURN_HOOKS}.
    * Pass `[]` — or a set without a given hook — to opt in to ordering it, once
    * the host awaits that dispatch.
+   *
+   * Composition-only: this describes the HOST's dispatch, not a user
+   * preference, so it is intentionally not a field of {@link Config} and never
+   * appears on the Settings page.
    */
   syncReturnHooks?: readonly string[]
   /** When set, the constraint DAG (JSON) is logged to this file on every change. */
   log?: string
+  /** Overrides the loader entry id; only non-loader harnesses need it. */
+  entryId?: string
 }
 
 /**
@@ -141,25 +166,33 @@ export interface Config {
  * package's own `cordis.patch.yml` is written exactly that way — every option
  * commented out — so a null config must mean "all defaults", not a crash.
  *
- * The row is the *composition* layer of the settings namespace: the Settings
- * page edits a user layer over it, and a namespace the user has not touched
- * resolves back to this row (or to the built-in defaults). Without a settings
- * provider — plain Cordis — the row is the whole answer.
+ * Since DSH 0.1.7 there is no second "user layer": the row's `config` IS the
+ * editable settings, because Cordis validates it against {@link Config} and the
+ * settings service projects that schema. A volatile field arrives here as a
+ * reference rather than a plain array, which is why every read goes through
+ * {@link readSetting} — that also keeps a plain Cordis mount (and an older
+ * harness) working, where the fields are plain values.
+ *
+ * `hooks`/`serialHooks` are read once, at apply time. An edit from the Settings
+ * page therefore needs a plugin reload to take effect — the same restart
+ * semantics this namespace declared before 0.1.7 (`applies: 'restart'`), since
+ * changing the controlled set means adding or removing live hook brackets and
+ * the coordinator has no public "release one hook" operation.
  *
  * @param ctx - the Cordis context.
  * @param config - which hooks to control and an optional DAG `log` file; null means all defaults.
  */
-export function apply(ctx: Context, config: Config | null = {}): void {
+export function apply(ctx: Context, config: ConfigShape | null = {}): void {
   const row = config ?? {}
-  const base: HooksOrderingSettings = {
-    hooks: row.hooks ?? DEFAULT_WATERFALL_HOOKS,
-    serialHooks: row.serialHooks ?? DEFAULT_SERIAL_HOOKS,
-    log: row.log ?? '',
+  const settings: HooksOrderingSettings = {
+    hooks: readSetting(row, 'hooks', DEFAULT_WATERFALL_HOOKS),
+    serialHooks: readSetting(row, 'serialHooks', DEFAULT_SERIAL_HOOKS),
+    log: readSetting(row, 'log', ''),
   }
-  const { hooks, serialHooks, log } = resolveSettings(ctx, base) ?? base
+  const { hooks, serialHooks, log } = settings
   const serviceConfig = log === '' ? {} : { log }
-  // Not part of the settings namespace: the sync-return list describes the
-  // HOST's dispatch, not a user preference, so it is composition (row) only.
+  // Not part of the settings form: the sync-return list describes the HOST's
+  // dispatch, not a user preference, so it is composition (row) only.
   const syncReturnHooks = row.syncReturnHooks ?? DEFAULT_SYNC_RETURN_HOOKS
 
   const deps: string[] = []

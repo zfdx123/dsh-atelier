@@ -78,11 +78,11 @@ function fakePrimitives() {
     Tag: make('Tag'),
     StateDot: make('StateDot'),
     Toast: make('Toast'),
-    IconCheckOutline16: make('IconCheckOutline16'),
-    IconWarningOutline16: make('IconWarningOutline16'),
-    IconCheckOutline14: make('IconCheckOutline14'),
-    IconPlusOutline16: make('IconPlusOutline16'),
-    IconSkillOutline16: make('IconSkillOutline16'),
+    IconCheckOutline: make('IconCheckOutline'),
+    IconWarningOutline: make('IconWarningOutline'),
+    IconCheckOutline: make('IconCheckOutline'),
+    IconPlusOutline: make('IconPlusOutline'),
+    IconSkillOutline: make('IconSkillOutline'),
   }
 }
 
@@ -815,7 +815,7 @@ test('ToastHost 渲染原生 Toast（成功用对勾图标），没有提示时�
   const host = exports.ToastHost({ toast: { id: 3, text: '已保存' }, anchor: null, onDone })
   assert.equal(host.type, ui.Toast)
   assert.equal(host.props.text, '已保存')
-  assert.equal(host.props.icon.type, ui.IconCheckOutline16)
+  assert.equal(host.props.icon.type, ui.IconCheckOutline)
   assert.equal(host.props.onDone, onDone)
   assert.equal(exports.ToastHost({ toast: null, anchor: null, onDone }), null)
 
@@ -939,13 +939,13 @@ test('图标（有原语）：新建按钮走 Button 的 icon 通道，文案不
   const { exports, ui } = await loadClient()
   const add = findAll(exports.SkillsView(EMPTY_VIEW), (node) => node.type === ui.Button && node.props.icon)
   assert.equal(add.length, 1, '工具条上的新建按钮要带外壳图标')
-  assert.equal(add[0].props.icon.type, ui.IconPlusOutline16)
+  assert.equal(add[0].props.icon.type, ui.IconPlusOutline)
   assert.equal(add[0].children[0], '新建技能', '有真图标时文案里不再重复一个「＋」')
 })
 
 test('图标（降级）：拿不到原语时新建按钮仍是「＋ 新建技能」，icon() 报 null 不抛错', async () => {
   const { exports } = await loadClient({ primitives: false })
-  assert.equal(exports.icon('IconPlusOutline16', 16), null, '没有图标库时图标位必须是 null')
+  assert.equal(exports.icon('IconPlusOutline', 16), null, '没有图标库时图标位必须是 null')
   const plain = findAll(
     exports.SkillsView(EMPTY_VIEW),
     (node) => node.type === 'button' && node.children[0] === '＋ 新建技能',
@@ -953,10 +953,10 @@ test('图标（降级）：拿不到原语时新建按钮仍是「＋ 新建技�
   assert.equal(plain.length, 1, '拿不到图标时必须保留原来的字形文案')
 })
 
-test('图标（有原语）：诊断行用 IconWarningOutline16，不再拼「✖ / !」', async () => {
+test('图标（有原语）：诊断行用 IconWarningOutline，不再拼「✖ / !」', async () => {
   const { exports, ui } = await loadClient()
   const row = exports.SkillRow(Object.assign({}, ROW_ARGS, { skill: SKILL_WITH_ISSUES }))
-  assert.equal(findAll(row, (node) => node.type === ui.IconWarningOutline16).length, 2, '两条诊断各带一个图标')
+  assert.equal(findAll(row, (node) => node.type === ui.IconWarningOutline).length, 2, '两条诊断各带一个图标')
   const rendered = JSON.stringify(row)
   assert.equal(rendered.includes('✖ 名字不合法'), false, '有图标时不再拼字形前缀')
   assert.equal(rendered.includes('! 缺描述'), false)
@@ -964,13 +964,13 @@ test('图标（有原语）：诊断行用 IconWarningOutline16，不再拼「�
 
 test('图标（降级）：拿不到原语时诊断行仍拼「✖ / !」，icon() 报 null 不抛错', async () => {
   const { exports } = await loadClient({ primitives: false })
-  assert.equal(exports.icon('IconWarningOutline16', 14), null)
+  assert.equal(exports.icon('IconWarningOutline', 14), null)
   const rendered = JSON.stringify(exports.SkillRow(Object.assign({}, ROW_ARGS, { skill: SKILL_WITH_ISSUES })))
   assert.equal(rendered.includes('✖ 名字不合法'), true, '拿不到图标时保留原来的字形前缀')
   assert.equal(rendered.includes('! 缺描述'), true)
 })
 
-test('图标（有原语）：弹窗里选中的根目录用 IconCheckOutline16，文案不带「✓ 」', async () => {
+test('图标（有原语）：弹窗里选中的根目录用 IconCheckOutline，文案不带「✓ 」', async () => {
   const { exports, ui } = await loadClient()
   const host = exports.DialogHost({
     dialog: { kind: 'move', target: SKILL },
@@ -981,14 +981,14 @@ test('图标（有原语）：弹窗里选中的根目录用 IconCheckOutline16�
   })
   const rows = findAll(host, (node) => node.type === ui.Button && node.props.style && node.props.style.width === '100%')
   assert.equal(rows.length, 2, '每个可写根目录一行')
-  assert.equal(rows[0].props.icon.type, ui.IconCheckOutline16, '默认选中的第一行用图标代替「✓ 」')
+  assert.equal(rows[0].props.icon.type, ui.IconCheckOutline, '默认选中的第一行用图标代替「✓ 」')
   assert.equal(rows[1].props.icon, null, '没选中的行不带图标')
   assert.equal(rows[0].children[0], CHOICE_LABEL, '有图标时文案里不再有「✓ 」')
 })
 
 test('图标（降级）：拿不到原语时根目录行退回自带按钮 +「✓ 」字形', async () => {
   const { exports } = await loadClient({ primitives: false })
-  assert.equal(exports.icon('IconCheckOutline16', 16), null)
+  assert.equal(exports.icon('IconCheckOutline', 16), null)
   const chosen = exports.rootChoice(CHOICE_ROOT, true, () => {})
   assert.equal(chosen.type, 'button')
   assert.equal(chosen.props.className, 'dsh-sm-fallback-btn')
@@ -996,16 +996,16 @@ test('图标（降级）：拿不到原语时根目录行退回自带按钮 +「
   assert.equal(exports.rootChoice(CHOICE_ROOT, false, () => {}).children[0], CHOICE_LABEL, '未选中的行没有字形')
 })
 
-test('图标（有原语）：侧栏入口用 IconSkillOutline16，不再渲染「◈」', async () => {
+test('图标（有原语）：侧栏入口用 IconSkillOutline，不再渲染「◈」', async () => {
   const { exports, ui } = await loadClient()
   const entry = exports.SidebarEntry({ ctx: {} })
-  assert.equal(findAll(entry, (node) => node.type === ui.IconSkillOutline16).length, 1)
+  assert.equal(findAll(entry, (node) => node.type === ui.IconSkillOutline).length, 1)
   assert.equal(findAll(entry, (node) => node.type === 'span' && node.children[0] === '◈').length, 0)
 })
 
 test('图标（降级）：拿不到原语时侧栏入口仍渲染「◈」字形', async () => {
   const { exports } = await loadClient({ primitives: false })
-  assert.equal(exports.icon('IconSkillOutline16', 14), null)
+  assert.equal(exports.icon('IconSkillOutline', 14), null)
   const entry = exports.SidebarEntry({ ctx: {} })
   assert.equal(findAll(entry, (node) => node.type === 'span' && node.children[0] === '◈').length, 1, '字形是降级路径')
 })

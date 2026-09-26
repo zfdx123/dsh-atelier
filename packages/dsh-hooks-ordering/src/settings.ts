@@ -1,24 +1,33 @@
 /**
- * The dsh settings namespace for this plugin: the three fields a user can edit
- * from the Settings page instead of a `cordis.patch.yml` row.
+ * This plugin's Cordis Config — and, since DSH 0.1.7, its Settings page.
  *
- * Two constraints are load-bearing and easy to get wrong:
+ * 0.1.7 removed `ctx.settings.register(ns, schema)`. Settings are now *projected
+ * from each entry's own Config*: the loader validates the row's `config` against
+ * this schema, resolves the defaults, and the settings service renders exactly
+ * the nodes marked `.volatile()` as an editable form. Three consequences are
+ * load-bearing here:
  *
- * - The schema handed to `settings.register` must be a **callable** schemastery
- *   schema. dsh resolves a namespace by calling `schema(merged)` and reads
- *   `schema.toJSON()` for the form, so a plain object throws
- *   `schema is not a function` — during plugin assembly, which takes the whole
- *   profile down rather than failing one form.
- * - That is also why registration is wrapped in `try/catch` here: an optional
- *   settings form must never be able to stop the harness from booting.
+ * - The defaults below are the *real* defaults, not "off" placeholders. Nothing
+ *   supplies a second `base` layer any more, so an entry whose `config:` key is
+ *   empty must resolve to the hook set this plugin controls by default.
+ * - `.volatile()` belongs on the individual fields, never on the root object:
+ *   a volatile root collapses the whole Config into a single reference and
+ *   discards every nested default (verified against schemastery 3.18.4), and
+ *   schemastery rejects a volatile node nested inside another volatile node.
+ * - The schema is built lazily by {@link hooksOrderingConfig}. `dsh.ts` imports
+ *   this module and this module needs `dsh.ts`'s default hook lists, so building
+ *   the schema eagerly would read those bindings before they are initialized.
+ *
+ * `syncReturnHooks` is deliberately absent: it describes the HOST's dispatch
+ * (which hooks are consumed without awaiting), not a user preference, so it
+ * stays composition-only in `apply()`.
  *
  * @module dsh-hooks-ordering/settings
  */
 
-import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 
-/** The three fields this plugin exposes for configuration. */
+/** The fields this plugin exposes as editable settings. */
 export interface HooksOrderingSettings {
   /** Waterfall hooks to control; `[]` disables the waterfall service entirely. */
   readonly hooks: readonly string[]
@@ -28,70 +37,60 @@ export interface HooksOrderingSettings {
   readonly log: string
 }
 
-/** Namespace name — dsh requires a lowercase hyphenated identifier. */
+/**
+ * Entry id used by `cordis.patch.yml` and, in 0.1.7, by the settings form.
+ *
+ * The form is keyed by the **loader entry id**; this constant is the shipped
+ * row's id, and it is also the client half's settings-section id.
+ */
 export const SETTINGS_NS = 'hooks-ordering'
 
 /**
- * Schema for {@link SETTINGS_NS}.
+ * Build the Config schema from the caller's default hook lists.
  *
- * Every field defaults to its "off" value. The *meaningful* defaults — the
- * hooks this plugin controls when nothing overrides them — are supplied by the
- * caller as the composition `base` layer (see {@link resolveSettings}), so a
- * namespace the user has never touched still resolves to a complete object.
- */
-export const HooksOrderingSettingsSchema = Schema.object({
-  hooks: Schema.array(Schema.string()).default([]),
-  serialHooks: Schema.array(Schema.string()).default([]),
-  log: Schema.string().default(''),
-})
-
-/**
- * The slice of dsh's `settings` service this plugin uses.
+ * Every field is `.volatile()`, so every field is user-editable from the
+ * Settings page and an edit is committed into the live reference instead of
+ * remounting the plugin. `log` is volatile too, because a non-volatile field
+ * would not appear in the form at all.
  *
- * Structural rather than imported from `@deepseek-ai/dsh-settings`: it describes
- * exactly the contract this plugin relies on without adding a build-time
- * dependency on a dsh package, whose internals are still 0.1.x-rc.
+ * @param defaultWaterfallHooks - waterfall hooks controlled when unconfigured.
+ * @param defaultSerialHooks - serial hooks controlled when unconfigured.
+ * @returns a callable schemastery schema, which is what Cordis resolves through.
  */
-export interface SettingsServiceLike {
-  /**
-   * @param ns - the namespace to register; must be a lowercase hyphenated identifier.
-   * @param schema - a callable schemastery schema, not a plain object.
-   * @param options - `base` is the composition layer, `applies` says whether an
-   * edit takes effect live or needs a restart.
-   * @returns a scope whose `get()` is the resolved value (schema defaults, then `base`, then the user layer).
-   */
-  register(
-    ns: string,
-    schema: unknown,
-    options?: { readonly base?: unknown; readonly applies?: 'live' | 'restart' },
-  ): { get(): HooksOrderingSettings }
+export function hooksOrderingConfig(
+  defaultWaterfallHooks: readonly string[],
+  defaultSerialHooks: readonly string[],
+): Schema {
+  return Schema.object({
+    hooks: Schema.array(Schema.string()).default([...defaultWaterfallHooks]).volatile(),
+    serialHooks: Schema.array(Schema.string()).default([...defaultSerialHooks]).volatile(),
+    log: Schema.string().default('').volatile(),
+  })
 }
 
 /**
- * Register the settings namespace and read its resolved value.
+ * Read one resolved field, unwrapping a volatile reference when the loader
+ * supplied one and falling back to a default when the field is absent.
  *
- * `base` is the composition layer — what the row (or the built-in defaults)
- * asks for — so the user layer edits *over* it and a reset returns to it rather
- * than to an empty form.
+ * A loader-provided Config carries volatile fields as references (`.get()`);
+ * a plain Cordis mount, or an older harness, passes plain values. Both must
+ * work, and an absent field must not be confused with an explicit empty one.
  *
- * `applies: 'restart'` is deliberate. Changing `hooks`/`serialHooks` means
- * installing or removing bracket listeners on live hooks, and the coordinator
- * has no public "release one hook" operation; a restart applies the change
- * cleanly instead of re-wiring the dispatch chain mid-flight.
- *
- * @param ctx - the Cordis context to look the service up on.
- * @param base - the composition layer to register as the base value.
- * @returns the resolved settings, or `undefined` when the provider is missing
- * (which `inject: ['settings']` rules out in dsh — the guard is defensive) or
- * registration failed — the caller then uses `base`.
+ * @param config - the resolved plugin config (possibly `null`).
+ * @param field - the field to read.
+ * @param fallback - value to use when the field is absent.
+ * @returns the field's current value, or `fallback`.
  */
-export function resolveSettings(ctx: Context, base: HooksOrderingSettings): HooksOrderingSettings | undefined {
-  const settings = ctx.get('settings') as SettingsServiceLike | undefined
-  if (settings === undefined) return undefined
-  try {
-    return settings.register(SETTINGS_NS, HooksOrderingSettingsSchema, { base, applies: 'restart' }).get()
-  } catch (error) {
-    console.warn('hooks-ordering: settings registration failed; falling back to the composition config:', error)
-    return undefined
+export function readSetting<T>(
+  config: object | null | undefined,
+  field: string,
+  fallback: T,
+): T {
+  const value = (config as Record<string, unknown> | null | undefined)?.[field]
+  if (value === undefined || value === null) return fallback
+  if (typeof (value as { get?: unknown }).get === 'function') {
+    const current = (value as { get(): unknown }).get()
+    return (current ?? fallback) as T
   }
+  return value as T
 }

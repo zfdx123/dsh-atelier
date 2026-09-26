@@ -1,8 +1,8 @@
 // dsh-mcp-manager — host half.
 //
-// MCP 服务器管理器：把 MCP 服务器配置放进 settings 命名空间 `mcp`
-// （持久化到 settings.yaml），并按配置在宿主侧挂载/卸载
-// @deepseek-ai/dsh-mcp-client 实例；每个服务器带 `enabled` 开关
+// MCP 服务器管理器：服务器列表是本插件 Cordis Config 的 `servers` 字段
+// （由 profile 条目的 config 持久化，见 cordis.patch.yml），按配置在宿主侧
+// 挂载/卸载 @deepseek-ai/dsh-mcp-client 实例；每个服务器带 `enabled` 开关
 // （默认 true）：开启/关闭只重建对应实例，其余不受影响；同时注册
 // 一个纯 JSON 的 HTTP 接口供设置页读写：
 //
@@ -18,17 +18,25 @@
 //      来源校验。**绝不能注册成无护栏的裸路由**：这台接口能写入任意 command
 //      并会被宿主立即执行。
 //
-// 生命周期：settings.register 的命名空间、路由、TLS 策略、logger exporter
-// 都是本插件 fiber 的 effect，插件被移除时自动清理；每个 mcp-client 实例
-// 通过 ctx.plugin() 挂载并持有 disposer，配置变化时按差异重建
-// （dsh-mcp-client 自身处理断开重连与工具注册/注销）。
+// 配置读写（DSH 0.1.7 契约，0.1.6 及更早的 `ctx.settings.register` 已移除）：
+//   - 读：`config.servers.get()` —— ServersSchema 是 volatile 的，Loader 把
+//     它包成可变引用，配置一改就地写入并发出 `loader/volatile-update`。
+//   - 写：`ctx.settings.replace(<profile 条目 id>, { servers }, rev)` ——
+//     0.1.7 的表单按 **loader 条目 id** 定位（不再按自取命名空间），修订号
+//     从 `ctx.settings.describe()` 的 `ns/revision` 取。
+//   没有 settings 服务（旧版组装）时降级为只读：工具照常工作，页面写入报错。
+//
+// 生命周期：路由、TLS 策略、logger exporter 都是本插件 fiber 的 effect，
+// 插件被移除时自动清理；每个 mcp-client 实例通过 ctx.plugin() 挂载并持有
+// disposer，配置变化时按差异重建（dsh-mcp-client 自身处理断开重连与工具
+// 注册/注销）。
 //
 // 状态的真实性：mcp-client 的连接/工具注册失败是异步的，只出现在它的
 // 日志里；本插件通过 Cordis logger exporter 截获 mcp-client 日志并翻译
 // 成 mountState（状态转换规则见 lib/logic.js 的 mcpClientLogToStatus）。
 //
 // 密钥不入盘：env / headers 的值支持 `env:NAME` 与 `cred:NAME` 引用，
-// 挂载时解析（进程环境变量 / ctx.credentials），settings.yaml 只存引用。
+// 挂载时解析（进程环境变量 / ctx.credentials），profile config 只存引用。
 //
 // TLS：内网自签名证书的 MCP 服务器可在设置里按服务器开 `tlsInsecure`
 // 或指定 `tlsCaFile`；策略由 lib/tls.js 只对那一个 origin 定向生效，其余
@@ -50,6 +58,14 @@ import { normalizeStdioServer, preflightStdioServer } from './lib/stdio.js'
 
 export const name = 'dsh-mcp-manager'
 export const inject = ['settings']
+
+/**
+ * 本插件自己的配置 schema。DSH 0.1.7 的 settings 由它投影而来：`servers` 是
+ * volatile 字段，因此设置页可以就地改写这一个节点，而不重挂整个插件。
+ * Loader 在调用 apply 之前已完成校验与默认值填充，所以 apply 里读到的
+ * `config.servers` 永远是一个可变引用（default [] 保证不为 undefined）。
+ */
+export const Config = ServersSchema
 
 /**
  * 确认窗口（毫秒）：挂载完成到「能证明连上了」之间允许的时间。
@@ -89,8 +105,27 @@ export function unconfirmedMessage(serverName, timeoutMs) {
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' }
 
-export function apply(ctx) {
-  ctx.settings.register('mcp', ServersSchema)
+export function apply(ctx, config) {
+  // DSH 0.1.7：表单按 loader 条目 id 定位（不再按插件自取的命名空间）。
+  // 条目 id 就是 profile patch 里那一行的 id，例如 `mcp-manager`。
+  //
+  // 不能在 apply 时取值：Cordis 在插件启动期间才把 loader 条目挂上。
+  // 装载器给插件 fiber 挂的是 `ctx.fiber.entry`（`Entry.key` 那个 symbol）；
+  // 每次需要时现取，profile 里即与那一行的 id 对齐。
+  //
+  // `config.entryId` 是给非 loader 载体（单测的内存 cordis）留的显式覆盖，
+  // 正常组合不设，所以真实运行时永远走 `ctx.fiber.entry.id`。
+  const entryIdOf = () => config?.entryId ?? ctx.fiber?.entry?.id
+
+  /**
+   * 读当前服务器列表。`config.servers` 是 Loader 的 volatile 引用：配置一改
+   * 就地更新，`.get()` 始终返回最新快照。
+   * @returns {Array<object>} 服务器配置数组
+   */
+  const readServers = () => {
+    const value = config?.servers?.get?.()
+    return Array.isArray(value) ? value : []
+  }
 
   // serverName -> ctx.plugin() 的 Fiber
   const handles = new Map()
@@ -106,7 +141,7 @@ export function apply(ctx) {
   // serverName -> 确认窗口定时器（有正向证据时取消）
   const confirmTimers = new Map()
 
-  // 挂载串行链 + 去抖：同一 tick 多次 settings/updated 合并成一次 sync。
+  // 挂载串行链 + 去抖：同一 tick 多次配置变化合并成一次 sync。
   let syncChain = Promise.resolve()
   let pendingServers = null
   let syncScheduled = false
@@ -114,19 +149,23 @@ export function apply(ctx) {
   const tls = createTlsBridge({ onWarn: (message) => ctx.logger.warn(message) })
   ctx.effect(() => () => tls.dispose(), 'dsh-mcp-manager: TLS 策略')
 
-  // 读取 mcp 命名空间的当前修订号（并发保存的乐观锁依据）。
+  // 读取本条目当前的修订号（并发保存的乐观锁依据）。
   //
-  // 权威来源是 settings.describe() 的描述符（字段名 ns + revision）；但它按字段名
-  // 取，上游一旦改名（dsh-settings README 已把 ns→namespace 列为 TODO）就静默取不到。
-  // 那时若退回常量 0，页面上每次保存都会 409「已被其他窗口修改」，比失去乐观锁更糟。
-  // 所以用 settings/document-updated 的推送值兜底：事件参数是位置参数，不受字段改名影响。
+  // DSH 0.1.7 的表单按 **loader 条目 id** 定位：settings.describe() 返回的
+  // 描述符里 `ns` 就是条目 id（例如 `mcp-manager`），revision 是当前修订号。
+  //
+  // 权威来源是 describe() 的描述符；但它从 describe 的字段名取，上游一旦改名
+  // 就静默取不到。那时若退回常量 0，页面上每次保存都会 409「已被其他窗口修改」，
+  // 比失去乐观锁更糟。所以用 settings/document-updated 的推送值兜底：事件参数
+  // 是位置参数，不受字段改名影响。
   let pushedRev = null
   ctx.on('settings/document-updated', (ns, revision) => {
-    if (ns === 'mcp' && Number.isInteger(revision)) pushedRev = revision
+    if (ns === entryIdOf() && Number.isInteger(revision)) pushedRev = revision
   })
   const currentRev = () => {
-    if (typeof ctx.settings.describe === 'function') {
-      const descriptor = ctx.settings.describe().find((entry) => entry && entry.ns === 'mcp')
+    const ns = entryIdOf()
+    if (ns !== undefined && typeof ctx.settings.describe === 'function') {
+      const descriptor = ctx.settings.describe().find((entry) => entry !== null && entry !== undefined && entry.ns === ns)
       if (descriptor !== undefined && Number.isInteger(descriptor.revision)) {
         pushedRev = descriptor.revision
         return descriptor.revision
@@ -442,32 +481,44 @@ export function apply(ctx) {
     },
   })
 
-  // settings/updated 是提交后的事件：配置一变，按差异对齐实例（去抖合并）。
+  // 0.1.7 的配置变化通知：volatile 节点被就地改写后，Loader 发出
+  // `loader/volatile-update`（只送到本 fiber 自己的监听器）。路径是相对根
+  // 的键路径数组，`[]` 表示根节点本身就是 volatile 节点。
+  //
+  // 旧版的 `settings/updated` 事件在 0.1.7 已不存在；这里两条都听，配置一变
+  // 就按差异对齐实例（去抖合并），在哪个版本上都只需这一处。
+  const onConfigChanged = () => scheduleSync(readServers())
+  ctx.on('loader/volatile-update', onConfigChanged)
   ctx.on('settings/updated', (ns, next) => {
-    if (ns !== 'mcp') return
-    scheduleSync(next && Array.isArray(next.servers) ? next.servers : [])
+    if (ns !== entryIdOf() && ns !== 'mcp') return
+    scheduleSync(Array.isArray(next?.servers) ? next.servers : readServers())
   })
 
   // 工具注册观察器必须在第一次挂载**之前**装好：那才是「确实连上了」的正向信号。
   observeToolRegistration()
 
   // 启动时按当前配置挂载（enabled: false 的服务器只记录为已关闭）。
-  const current = ctx.settings.get('mcp')
-  scheduleSync(current && Array.isArray(current.servers) ? current.servers : [])
+  scheduleSync(readServers())
 
   registerHttpApi(
     ctx,
     createApiHandler({
-      getServers: () => {
-        const value = ctx.settings.get('mcp')
-        return value && Array.isArray(value.servers) ? value.servers : []
-      },
+      getServers: readServers,
       getRev: currentRev,
       getStatus: () => Object.fromEntries(mountState),
       replaceServers: async (servers, rev) => {
         const invalid = validateServers(servers)
         if (invalid !== null) throw new Error(invalid)
-        await ctx.settings.replace('mcp', { servers }, rev)
+        // 服务方法要在**调用时**取：装配期 ctx.settings 可能还没把方法暴露出来。
+        const replace = ctx.settings?.replace
+        const ns = entryIdOf()
+        if (process.env.DBG_SETTINGS) console.log('DBG ns=', JSON.stringify(ns), 'replace=', typeof replace)
+        if (ns === undefined || typeof replace !== 'function') {
+          throw new Error(
+            '当前宿主没有可写入的配置表单（settings.replace 不可用）：请在 profile 条目的 config 里直接编辑本插件的 servers。',
+          )
+        }
+        await replace.call(ctx.settings, ns, { servers }, rev)
       },
     }),
   )

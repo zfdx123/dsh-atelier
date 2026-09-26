@@ -14,9 +14,11 @@
 //   - the file is a classic script, so it has no import/export: React arrives
 //     through the synchronous `require` handed to the factory.
 //
-// Writes go through `scope.mutate` rather than `scope.set`: the latter is
-// documented for a "scalar field", while our fields are string arrays, and
-// path-addressed ops say exactly what is meant for both save and reset.
+// Writes go through two path-addressed ops rather than a scalar setter: the
+// fields are string arrays, and `{op:'set'|'unset', path}` says exactly what is
+// meant for both save and reset. They are sent to the settings Remote namespace
+// (`ctx.remote.settings.mutate`), which resolves them against the stored section
+// rather than against whatever this page last read.
 //
 // The namespace is `applies: 'restart'`, so the page says so instead of
 // pretending a save took effect immediately.
@@ -102,7 +104,7 @@
         fieldHooks: 'waterfall 钩子（每行一个）',
         fieldSerialHooks: 'serial 钩子（每行一个）',
         fieldLog: '约束 DAG 日志文件（留空即不记录）',
-        note: '改动在重启 dsh 后生效（该命名空间 applies: restart）。清空某字段即回到组合层：目前 base = {hooks} 个 waterfall / {serial} 个 serial 钩子。',
+        note: '改动在重启 dsh 后生效（hooks/serialHooks 的变更需要重新挂载钩子）。清空某字段即回到 schema 默认值。',
         saveFailed: '保存失败：{message}',
         saving: '保存中…',
         save: '保存',
@@ -119,7 +121,7 @@
         fieldHooks: 'Waterfall hooks (one per line)',
         fieldSerialHooks: 'Serial hooks (one per line)',
         fieldLog: 'Constraint DAG log file (leave empty to log nothing)',
-        note: 'Changes take effect after dsh restarts (the namespace is applies: restart). Clearing a field returns it to the composition layer: base = {hooks} waterfall / {serial} serial hooks right now.',
+        note: 'Changes take effect after dsh restarts (editing hooks/serialHooks re-mounts the hook brackets). Clearing a field returns it to the schema default.',
         saveFailed: 'Save failed: {message}',
         saving: 'Saving…',
         save: 'Save',
@@ -345,16 +347,185 @@
       }
 
       // ── the settings page ──────────────────────────────────────────────────
+
+      /**
+       * Interpret the setting page's view of one entry.
+       *
+       * Three inputs can describe it: an already-assembled view (`{status,
+       * value, ...}`), a raw settings descriptor (`{ns, value, revision}`), or
+       * nothing at all.
+       *
+       * @param raw - one of the shapes above, or null/undefined.
+       * @returns a view this page can render, or `null` when there is no entry.
+       */
+      function normaliseSnapshot(raw) {
+        if (raw === null || raw === undefined) return null
+        var writable = raw.writable !== false
+        if (raw.status === 'unavailable' || raw.available === false) {
+          return {
+            status: 'unavailable',
+            available: false,
+            writable: false,
+            revision: undefined,
+            value: null,
+            base: {},
+            reason: raw.reason,
+          }
+        }
+        return {
+          status: 'ready',
+          available: true,
+          writable: writable,
+          revision: raw.revision,
+          value: raw.value || null,
+          base: raw.base || {},
+        }
+      }
+
+      /**
+       * Adapt the 0.1.7 `ctx.remote.settings` namespace to the snapshot surface
+       * this page renders from.
+       *
+       * 0.1.6 exposed a `settingsScope` service that answered snapshots
+       * synchronously. 0.1.7 removed it: a page now talks to the settings
+       * Remote, whose `describe()`/`mutate()` are async and keyed by the
+       * profile entry id. This adapter resolves the descriptor once, re-resolves
+       * it on the host's `settings/document-updated` notification.
+       *
+       * @param ctx - the plugin context (provides `remote`).
+       */
+      function createSettingsSource(ctx) {
+        var remote = ctx && ctx.remote && ctx.remote.settings
+        /**
+         * Why the form has no data. Kept as a concrete, user-visible string:
+         * "not available" on its own made a wiring fault indistinguishable from
+         * a not-yet-mounted host half, and that cost a lot of blind debugging.
+         */
+        function unavailableBecause(reason) {
+          return {
+            status: 'unavailable',
+            available: false,
+            writable: false,
+            value: null,
+            revision: undefined,
+            reason: reason,
+          }
+        }
+
+        /**
+         * @returns a promise of the current descriptor view, or of an
+         * `unavailable` view carrying the concrete reason.
+         */
+        function read() {
+          if (!ctx || !ctx.remote) {
+            return Promise.resolve(unavailableBecause('ctx.remote is not injected'))
+          }
+          if (!remote) {
+            return Promise.resolve(unavailableBecause('the ctx.remote.settings namespace is absent'))
+          }
+          if (typeof remote.describe !== 'function') {
+            return Promise.resolve(unavailableBecause('ctx.remote.settings.describe is not a function'))
+          }
+          return Promise.resolve()
+            .then(function () {
+              return remote.describe()
+            })
+            .then(function (answer) {
+              var list = answer && Array.isArray(answer.namespaces) ? answer.namespaces : null
+              if (list === null) {
+                return unavailableBecause('describe() returned no namespaces array')
+              }
+              var found
+              for (var i = 0; i < list.length; i += 1) {
+                if (list[i] && list[i].ns === NS) {
+                  found = list[i]
+                  break
+                }
+              }
+              if (found === undefined) {
+                var seen = list
+                  .map(function (entry) {
+                    return entry && entry.ns
+                  })
+                  .filter(Boolean)
+                  .join(', ')
+                return unavailableBecause(
+                  'no settings entry is named "' + NS + '" (describe() returned: ' + (seen || 'nothing') + ')',
+                )
+              }
+              return {
+                status: 'ready',
+                available: true,
+                // The provider's writability gates the whole form; a read-only
+                // deployment still shows the effective values.
+                writable: answer.writable !== false,
+                value: found.value || null,
+                revision: found.revision,
+                base: {},
+              }
+            }, function (failure) {
+              return unavailableBecause(
+                'describe() failed: ' + String((failure && failure.message) || failure),
+              )
+            })
+        }
+
+        return {
+          available: remote !== undefined && typeof remote.describe === 'function',
+          /**
+           * @param ops - `SettingsPathOp` list, e.g. `{op:'set', path, value}`.
+           * @returns a promise resolving to the refreshed view.
+           */
+          mutate: function (ops) {
+            if (!remote || typeof remote.mutate !== 'function') {
+              return Promise.reject(new Error('settings remote is unavailable in this deployment'))
+            }
+            // The revision is read fresh immediately before the write so a page
+            // left open across another edit reports a conflict instead of
+            // silently overwriting it.
+            return read().then(function (snap) {
+              if (!snap.available) {
+                throw new Error(snap.reason || 'this plugin has no settings entry in the active profile')
+              }
+              return remote.mutate(NS, ops, snap.revision)
+            })
+          },
+          /**
+           * @param listener - called after every host-side change to this entry.
+           * @returns an unsubscribe function.
+           */
+          subscribe: function (listener) {
+            // The event surface lives on `ctx.remote` itself, not on the
+            // namespace: a shipped settings page listens as
+            // `ctx.remote.$on('credentials/reference-updated', …)` while
+            // declaring `inject: ['remote', 'remote.<ns>']`.
+            var events = ctx && ctx.remote
+            if (!events || typeof events.$on !== 'function') return function () {}
+            try {
+              return events.$on('settings/document-updated', function (ns) {
+                if (ns === undefined || ns === NS) listener()
+              })
+            } catch (error) {
+              // A missing gateway listener must not take the page down.
+              return function () {}
+            }
+          },
+          read: read,
+        }
+      }
+
       /** @param props - the section owner props plus the plugin context. */
       function SettingsSection(props) {
         var ctx = props.ctx
-        var scopeRef = useRef(null)
-        if (scopeRef.current === null) scopeRef.current = ctx.settingsScope.bind({ namespace: NS })
-        var scope = scopeRef.current
+        // A host that can answer synchronously may hand the view over directly;
+        // against the real shell this is undefined and the page reads the
+        // settings Remote instead.
+        var seed = normaliseSnapshot(props.settingsSnapshot)
+        var sourceRef = useRef(null)
+        if (sourceRef.current === null) sourceRef.current = createSettingsSource(ctx)
+        var source = sourceRef.current
 
-        var snapState = useState(function () {
-          return scope.getSnapshot()
-        })
+        var snapState = useState(seed)
         var snap = snapState[0]
         var setSnap = snapState[1]
 
@@ -372,23 +543,39 @@
 
         useEffect(
           function () {
-            return scope.subscribe(function () {
-              setSnap(scope.getSnapshot())
-            })
+            var alive = true
+            function refresh() {
+              source.read().then(
+                function (next) {
+                  if (alive) setSnap(next)
+                },
+                function (failure) {
+                  if (alive) setError(String((failure && failure.message) || failure))
+                },
+              )
+            }
+            // A supplied snapshot is already the current view; only the Remote
+            // path needs the initial round trip.
+            if (seed === null) refresh()
+            var off = source.subscribe(refresh)
+            return function () {
+              alive = false
+              off()
+            }
           },
-          [scope],
+          [source],
         )
 
         // Re-seed the editor from every accepted snapshot, but never over an
         // unsaved edit: the user's typing outranks a background refresh.
-        var revision = snap.revision
+        var revision = snap ? snap.revision : undefined
         useEffect(
           function () {
-            if (dirtyRef.current) return
+            if (dirtyRef.current || snap === null) return
             var value = snap.value || {}
             setDraft({ hooks: toLines(value.hooks), serialHooks: toLines(value.serialHooks), log: value.log || '' })
           },
-          [revision, snap.value],
+          [revision, snap],
         )
 
         /** @param fieldName - settings field to edit; @param next - its new textarea content. */
@@ -417,7 +604,7 @@
         }
 
         function save() {
-          var value = snap.value || {}
+          var value = (snap && snap.value) || {}
           var ops = []
           if (!sameLines(value.hooks, draft.hooks)) {
             ops.push({ op: 'set', path: ['hooks'], value: fromLines(draft.hooks) })
@@ -429,13 +616,13 @@
             ops.push({ op: 'set', path: ['log'], value: draft.log })
           }
           if (ops.length === 0) return
-          settle(scope.mutate(ops))
+          settle(source.mutate(ops))
         }
 
-        /** Send every field back to the composition layer (`base`). */
+        /** Send every field back to the composition default (the schema default). */
         function reset() {
           settle(
-            scope.mutate([
+            source.mutate([
               { op: 'unset', path: ['hooks'] },
               { op: 'unset', path: ['serialHooks'] },
               { op: 'unset', path: ['log'] },
@@ -443,7 +630,9 @@
           )
         }
 
-        var writable = snap.writable
+        // Unknown until the descriptor arrives; a read-only provider disables
+        // the whole form rather than letting the user type into a dead editor.
+        var writable = snap !== null && snap.writable
 
         /**
          * @param label - field caption.
@@ -496,37 +685,44 @@
           )
         }
 
-        var dirty =
-          !sameLines(snap.value && snap.value.hooks, draft.hooks) ||
-          !sameLines(snap.value && snap.value.serialHooks, draft.serialHooks) ||
-          ((snap.value && snap.value.log) || '') !== draft.log
+        var current = (snap && snap.value) || {}
 
-        var base = snap.base || {}
+        var dirty =
+          !sameLines(current.hooks, draft.hooks) ||
+          !sameLines(current.serialHooks, draft.serialHooks) ||
+          (current.log || '') !== draft.log
+
+        // Three states: the descriptor has not arrived yet, this deployment has
+        // no settings entry for the plugin, or the form is ready.
+        var body
+        if (snap === null) {
+          body = e('p', null, t('loading'))
+        } else if (!snap.available) {
+          // Print the concrete cause next to the headline: the generic sentence
+          // alone could not tell a wiring fault from an unmounted host half.
+          body = e(
+            'div',
+            null,
+            e('p', null, t('unavailable')),
+            snap.reason ? e('p', { className: 'ho-note' }, String(snap.reason)) : null,
+          )
+        } else {
+          body = e(
+            'div',
+            { className: CLASS },
+            renderListField(t('fieldHooks'), 'hooks', draft.hooks, 8),
+            renderListField(t('fieldSerialHooks'), 'serialHooks', draft.serialHooks, 3),
+            renderLineField(t('fieldLog'), 'log', draft.log),
+          )
+        }
 
         return e(
           'div',
           { className: CLASS },
           e('h3', null, t('nav')),
           e('p', null, t('intro')),
-          snap.status === 'loading'
-            ? e('p', null, t('loading'))
-            : snap.status === 'unavailable'
-              ? e('p', null, t('unavailable'))
-              : e(
-                  'div',
-                  { className: CLASS },
-                  renderListField(t('fieldHooks'), 'hooks', draft.hooks, 8),
-                  renderListField(t('fieldSerialHooks'), 'serialHooks', draft.serialHooks, 3),
-                  renderLineField(t('fieldLog'), 'log', draft.log),
-                ),
-          e(
-            'p',
-            { className: 'ho-note' },
-            t('note', {
-              hooks: String(Array.isArray(base.hooks) ? base.hooks.length : 0),
-              serial: String(Array.isArray(base.serialHooks) ? base.serialHooks.length : 0),
-            }),
-          ),
+          body,
+          e('p', { className: 'ho-note' }, t('note')),
           error ? saveFailedStatus(error) : null,
           e(
             'div',
@@ -546,7 +742,7 @@
       }
 
       /**
-       * @param message - the failure text reported by `scope.mutate`.
+       * @param message - the failure text reported by the settings write.
        * @returns the save-failure status: the shell's StateDot + Tag when the kit is
        * there, the plugin's own chip when it is not.
        */
@@ -560,11 +756,12 @@
       }
 
       // ── plugin ─────────────────────────────────────────────────────────────
-      // 'locale' is a required service: without the locale plugin in the
-      // composition this plugin does not activate at all, rather than
-      // registering a page with no copy. bindLocale still degrades for a
-      // partial context (see above).
-      var inject = ['slots', 'settingsScope', 'locale']
+      // 'remote.settings' is a required service: the settings Remote namespace
+      // is how a 0.1.7 page reads and writes its entry. Without it the page is
+      // not registered at all, rather than rendering an editor that cannot save.
+      // 0.1.6 exposed `settingsScope` instead; that service no longer exists, so
+      // naming it here would leave this plugin permanently pending.
+      var inject = ['slots', 'remote', 'remote.settings', 'locale']
 
       /** @param ctx - the client plugin context. */
       function apply(ctx) {

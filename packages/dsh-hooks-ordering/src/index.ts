@@ -45,7 +45,8 @@ export { type SerialHookEntry, type SerialHookOrderingConfig, SerialHookOrdering
 // it as its default.
 export {
   apply,
-  type Config,
+  Config,
+  type ConfigShape,
   DEFAULT_SERIAL_HOOKS,
   DEFAULT_SYNC_RETURN_HOOKS,
   DEFAULT_WATERFALL_HOOKS,

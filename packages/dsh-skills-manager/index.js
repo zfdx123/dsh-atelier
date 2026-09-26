@@ -47,55 +47,61 @@ import {
 } from './lib/store.js'
 
 export const name = 'dsh-skills-manager'
-// settings 是硬依赖：没有它就没有可配置的技能根目录。
+// settings 是硬依赖：没有它就没有可写入的技能根目录。
 export const inject = ['settings']
+
+/**
+ * 本插件自己的 Config。DSH 0.1.7 的 settings 由它投影而来：技能根目录那几个
+ * 数组字段是 volatile 的，因此设置页可以就地改写它们而不重挂插件。
+ */
+export const Config = SkillManagerSchema
 
 /** HTTP API 路径（客户端按这个常量调用）。 */
 export const API_PATH = '/api/skills/manager'
 /** 模型工具名。 */
 export const TOOL_NAME = 'skill_manager'
-/** settings 命名空间。 */
+/**
+ * 本插件在 profile 里的默认条目 id（cordis.patch.yml 里的那一行）。
+ *
+ * 0.1.7 的表单按 **loader 条目 id** 定位，运行时以 `ctx.fiber.entry.id` 为准；
+ * 这个常量只作为无 loader 载体（单测）与文档的兜底名。
+ */
 export const SETTINGS_NS = 'skill-manager'
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' }
 
 /**
  * 插件入口。
  * @param {object} ctx Cordis 上下文
+ * @param {object} [config] Loader 解析后的本插件 Config（0.1.7 起由 Cordis 传入）
  */
-export function apply(ctx) {
-  // 设置命名空间：管理器的根目录扩展点。schema 必须是可调用的 schemastery 对象
-  // （见 lib/schema.js 的说明）。
-  //
-  // 这一行刻意包在 try/catch 里：settings.register 在**装配阶段**执行，一旦抛错
-  // 就会以 "plugin tree failed to load: failed to apply loader entry skill-manager"
-  // 的形式让**整个 profile 起不来**——一个可选的技能管理器不应该有这种权力。
-  // 注册失败时降级为「全部用默认配置」，其余功能照常工作。
-  let settingsRegistered = true
-  try {
-    ctx.settings.register(SETTINGS_NS, SkillManagerSchema)
-  } catch (error) {
-    settingsRegistered = false
-    ctx.logger.warn(`dsh-skills-manager: 设置命名空间注册失败，将只使用默认配置：${String(error?.message ?? error)}`)
+export function apply(ctx, config) {
+  // 表单定位用的 loader 条目 id：apply 阶段 fiber.entry 可能还没挂上，所以现取。
+  // `config.entryId` 是给非 loader 载体（单测的内存 cordis）留的显式覆盖。
+  const entryIdOf = () => config?.entryId ?? ctx.fiber?.entry?.id ?? SETTINGS_NS
+
+  /**
+   * 读一个 volatile 数组字段：Loader 把它包成引用，`.get()` 永远是最新快照。
+   * 非 volatile（无引用）时退回普通数组值。
+   */
+  const readList = (field) => {
+    const value = config?.[field]
+    const raw = value !== null && value !== undefined && typeof value.get === 'function' ? value.get() : value
+    return Array.isArray(raw) ? raw : []
   }
 
   /**
    * 读取当前设置（缺字段用默认值兜底，避免半截配置把管理器打挂）。
-   * @returns {{cwd: string, customSkillDirs: string[], deepSkillDirs: string[], bundledSkillDir: string, projects: string[]}} 配置
+   * @returns {{cwd: string, customSkillDirs: string[], deepSkillDirs: string[], bundledSkillDir: string, projects: string[], inventory: boolean}} 配置
    */
-  const readConfig = () => {
-    // 命名空间注册失败时不读设置（get 会抛），直接用默认值——管理器其余部分照常可用。
-    const value = settingsRegistered ? ctx.settings.get(SETTINGS_NS) : undefined
-    const config = value !== null && value !== undefined && typeof value === 'object' ? value : {}
-    return {
-      cwd: process.cwd(),
-      customSkillDirs: Array.isArray(config.customSkillDirs) ? config.customSkillDirs : [],
-      deepSkillDirs: Array.isArray(config.deepSkillDirs) ? config.deepSkillDirs : [],
-      bundledSkillDir: typeof config.bundledSkillDir === 'string' ? config.bundledSkillDir : '',
-      projects: Array.isArray(config.projects) ? config.projects : [],
-      // 缺字段（老配置）按「登记」处理：只有显式 false 才不登记。
-      inventory: config.inventory !== false,
-    }
-  }
+  const readConfig = () => ({
+    cwd: process.cwd(),
+    customSkillDirs: readList('customSkillDirs'),
+    deepSkillDirs: readList('deepSkillDirs'),
+    bundledSkillDir: typeof config?.bundledSkillDir === 'string' ? config.bundledSkillDir : '',
+    projects: readList('projects'),
+    // 缺字段（老配置）按「登记」处理：只有显式 false 才不登记。
+    inventory: config?.inventory !== false,
+  })
 
   // ── 把管理的技能登记给 DSH ────────────────────────────────────────────────
   // 官方 provider 只扫**它自己配置里**的根，管理器面板添加的目录它根本不知道。
@@ -227,13 +233,19 @@ export function apply(ctx) {
   const writableRoots = (data) => data.roots.filter((root) => root.writable && root.exists !== false)
 
   // ── 自定义技能文件夹 ──────────────────────────────────────────────────────
-  // 用户目录（rank 300）的读写。自定义目录存在设置里，所以「添加/移除」本质是
-  // 一次 settings 写入；写完之后 buildContext 下次就会把新根扫进来。
+  // 用户目录（rank 300）的读写。自定义目录存在本插件的 Config 里，所以
+  // 「添加/移除」本质是一次 settings 表单写入；写完之后 buildContext 下次就会把
+  // 新根扫进来。
 
-  /** 读一个命名空间的 {value, revision}；拿不到时两者都是 undefined。 */
-  const readSettings = (ns) => {
-    if (!settingsRegistered || typeof ctx.settings.describe !== 'function')
-      return { value: undefined, revision: undefined }
+  /**
+   * 读本条目当前的 {value, revision}；拿不到时两者都是 undefined。
+   *
+   * 0.1.7 的 `describe()` 返回**当前可编辑的表单值**（已按 schema 归一化），
+   * 正好可以拿来重建整个 section。
+   */
+  const readSettings = () => {
+    if (typeof ctx.settings?.describe !== 'function') return { value: undefined, revision: undefined }
+    const ns = entryIdOf()
     const descriptor = ctx.settings.describe().find((entry) => entry !== null && entry !== undefined && entry.ns === ns)
     if (descriptor === undefined) return { value: undefined, revision: undefined }
     return { value: descriptor.value, revision: descriptor.revision }
@@ -241,23 +253,23 @@ export function apply(ctx) {
 
   /** 设置项的写入是否可用（provider 可能是只读的）。 */
   const settingsWritable = () =>
-    settingsRegistered && ctx.settings.writable !== false && typeof ctx.settings.replace === 'function'
+    typeof ctx.settings?.replace === 'function' && ctx.settings.writable !== false
 
   /**
-   * 整体替换一个命名空间，并在 revision 冲突时重试。
+   * 用 build 的结果整体替换本插件的配置 section，并在 revision 冲突时重试。
    *
    * `SettingsPathOp` 只支持 {op:'set'|'unset', path}，按路径整键替换，**没有
    * 数组追加语义**——多个窗口同时加目录时只能靠 expectedRevision 冲突重试，
    * 以最后一次读到的值重建列表。所以这里必须重读，而不是复用调用方传入的旧列表。
    *
-   * @param {string} ns 命名空间
-   * @param {(current: object) => object} build 由当前值算出下一个值
+   * @param {(current: object) => object} build 由当前值算出下一个 section
    * @returns {Promise<object>} 写入后的解析值
-   * @throws {Error} 命名空间只读、未注册或多次冲突
+   * @throws {Error} 表单只读、未登记或多次冲突
    */
-  const writeSettings = async (ns, build) => {
+  const writeSettings = async (build) => {
+    const ns = entryIdOf()
     if (!settingsWritable()) {
-      throw new Error('设置当前不可写（settings provider 只读或命名空间未注册），无法保存自定义文件夹')
+      throw new Error('设置当前不可写（settings provider 只读），无法保存自定义文件夹')
     }
     let lastError
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -266,7 +278,7 @@ export function apply(ctx) {
       const next = build({ ...current })
       try {
         await ctx.settings.replace(ns, next, revision)
-        // 这个命名空间装的只有技能根目录（customSkillDirs / deepSkillDirs），改根
+        // 这份 section 装的只有技能根目录（customSkillDirs / deepSkillDirs），改根
         // 就是改技能集合——和写技能文件一样，得让 DSH 重扫。
         notifySkillsChanged()
         return readSettings(ns).value ?? next
@@ -416,7 +428,7 @@ export function apply(ctx) {
           if (context.roots.some((root) => samePath(root.path, target) && root.source !== 'custom')) {
             throw new Error(`这个目录已经是内置技能根（${target}）`)
           }
-          const next = await writeSettings(SETTINGS_NS, (current) => ({
+          const next = await writeSettings((current) => ({
             ...current,
             // 放进哪个列表由 deep 决定，并把它从另一个列表里摘掉，保证两表互斥。
             customSkillDirs: deep
@@ -453,7 +465,7 @@ export function apply(ctx) {
           if (!before.some((dir) => samePath(dir, target))) {
             throw new Error(`列表里没有这个目录：${target}`)
           }
-          const next = await writeSettings(SETTINGS_NS, (current) => ({
+          const next = await writeSettings((current) => ({
             ...current,
             customSkillDirs: (Array.isArray(current.customSkillDirs) ? current.customSkillDirs : []).filter(
               (dir) => !samePath(dir, target),
@@ -482,7 +494,7 @@ export function apply(ctx) {
           const deep = request.deep === true
           const before = [...readConfig().customSkillDirs, ...readConfig().deepSkillDirs]
           if (!before.some((dir) => samePath(dir, target))) throw new Error(`列表里没有这个目录：${target}`)
-          const next = await writeSettings(SETTINGS_NS, (current) => ({
+          const next = await writeSettings((current) => ({
             ...current,
             customSkillDirs: deep
               ? (Array.isArray(current.customSkillDirs) ? current.customSkillDirs : []).filter(
@@ -806,7 +818,7 @@ export function apply(ctx) {
                   if (context.roots.some((root) => samePath(root.path, target) && root.source !== 'custom')) {
                     throw new Error(`这个目录已经是内置技能根：${target}`)
                   }
-                  await writeSettings(SETTINGS_NS, (current) => ({
+                  await writeSettings((current) => ({
                     ...current,
                     customSkillDirs: deep
                       ? (Array.isArray(current.customSkillDirs) ? current.customSkillDirs : []).filter(
@@ -832,7 +844,7 @@ export function apply(ctx) {
                   if (![...config.customSkillDirs, ...config.deepSkillDirs].some((dir) => samePath(dir, target))) {
                     throw new Error(`列表里没有这个目录：${target}`)
                   }
-                  await writeSettings(SETTINGS_NS, (current) => ({
+                  await writeSettings((current) => ({
                     ...current,
                     customSkillDirs: (Array.isArray(current.customSkillDirs) ? current.customSkillDirs : []).filter(
                       (dir) => !samePath(dir, target),
@@ -852,7 +864,7 @@ export function apply(ctx) {
                   if (![...config.customSkillDirs, ...config.deepSkillDirs].some((dir) => samePath(dir, target))) {
                     throw new Error(`列表里没有这个目录：${target}`)
                   }
-                  await writeSettings(SETTINGS_NS, (current) => ({
+                  await writeSettings((current) => ({
                     ...current,
                     customSkillDirs: deep
                       ? (Array.isArray(current.customSkillDirs) ? current.customSkillDirs : []).filter(

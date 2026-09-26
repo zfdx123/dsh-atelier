@@ -62,7 +62,7 @@ window.__ModuleLoader__.load({
       registryOff: '技能登记已关闭：这 {n} 个技能只在面板可见，DSH 不会加载、模型也用不到。',
       registryPending: '磁盘上有、但还没进入 DSH 目录（提供者刷新延迟）：{names}',
       newSkill: '＋ 新建技能',
-      // 同上，但无字形：拿得到外壳 IconPlusOutline16 时用这条（图标自己就是那个「＋」）。
+      // 同上，但无字形：拿得到外壳 IconPlusOutline 时用这条（图标自己就是那个「＋」）。
       newSkillPlain: '新建技能',
       refresh: '刷新',
       refreshing: '刷新中…',
@@ -192,7 +192,7 @@ window.__ModuleLoader__.load({
         'Skill registration is off — unmanaged skills: {n}. They show in this panel only; DSH does not load them and the model cannot use them.',
       registryPending: 'On disk but not yet in the DSH catalog (provider refresh lag): {names}',
       newSkill: '＋ New skill',
-      // Icon-less twin of `newSkill`: used once the shell's IconPlusOutline16 leads the button.
+      // Icon-less twin of `newSkill`: used once the shell's IconPlusOutline leads the button.
       newSkillPlain: 'New skill',
       refresh: 'Refresh',
       refreshing: 'Refreshing…',
@@ -657,10 +657,10 @@ window.__ModuleLoader__.load({
      * 弹窗里的根目录候选行。
      *
      * 选中态原来靠文案前缀「✓ 」表示，现在改走 Button 的 icon 通道（外壳
-     * IconCheckOutline16）；拿不到图标时文案照旧带字形，行的行为与外观不变。
+     * IconCheckOutline）；拿不到图标时文案照旧带字形，行的行为与外观不变。
      */
     function rootChoice(root, selected, onPick) {
-      var check = selected ? icon('IconCheckOutline16', 16) : null
+      var check = selected ? icon('IconCheckOutline', 16) : null
       return button(
         {
           key: root.path,
@@ -983,7 +983,7 @@ window.__ModuleLoader__.load({
       return e(UI.Toast, {
         key: props.toast.id,
         text: props.toast.text,
-        icon: e(UI.IconCheckOutline16, { size: 14 }),
+        icon: e(UI.IconCheckOutline, { size: 14 }),
         anchor: props.anchor || null,
         holdMs: 3000,
         onDone: props.onDone,
@@ -1031,7 +1031,7 @@ window.__ModuleLoader__.load({
                 return issue.level !== 'info'
               })
               .map(function (issue, index) {
-                var mark = icon('IconWarningOutline16', 14)
+                var mark = icon('IconWarningOutline', 14)
                 return e(
                   'div',
                   { key: index, style: issue.level === 'error' ? S.issueError : S.issue },
@@ -1540,7 +1540,7 @@ window.__ModuleLoader__.load({
       var groups = groupByRoot(data.skills, data.roots)
       var summary = data.summary
       // 新建按钮的前置图标：拿得到外壳图标就用它，文案换成无字形的那条（见 button 调用）。
-      var addIcon = icon('IconPlusOutline16', 16)
+      var addIcon = icon('IconPlusOutline', 16)
 
       return e(
         'div',
@@ -2251,7 +2251,7 @@ window.__ModuleLoader__.load({
     function SidebarEntry(props) {
       var ctx = props.ctx
       // 入口图标：外壳的 skill 字形（文档 + 星点），拿不到才用原来的「◈」。
-      var glyph = icon('IconSkillOutline16', 14)
+      var glyph = icon('IconSkillOutline', 14)
       var openState = useState(false)
       var open = openState[0]
       var setOpen = openState[1]

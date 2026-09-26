@@ -41,9 +41,40 @@ const isEl = (node: unknown): node is El =>
 
 const noop = (): void => {}
 
-/** Minimal React stand-in: the factory only needs createElement and the hooks. */
-function stubReact(): unknown {
-  return {
+/**
+ * The React double. Besides `createElement` it drives a single mounted
+ * component far enough for the settings page to load: `useState` returns a
+ * working setter, `useEffect` runs on mount (once) and thereafter whenever its
+ * dependency list changes, and pending promises can be flushed. That is what
+ * lets a test observe the page after its async descriptor read, which the
+ * 0.1.7 Remote requires (`describe()` is not synchronous).
+ */
+function createReactDouble() {
+  interface Mount {
+    states: unknown[]
+    setters: ((next: unknown) => void)[]
+    effects: { deps: unknown[] | undefined; cleanup: (() => void) | undefined }[]
+    refs: { current: unknown }[]
+    /** Hook position within the current render; React's own bookkeeping. */
+    cursor: number
+  }
+  let active: Mount | null = null
+
+  const freshMount = (): Mount => ({ states: [], setters: [], effects: [], refs: [], cursor: 0 })
+
+  /** The mount a render writes into; one is created for a standalone render. */
+  const currentMountForRender = (): Mount => {
+    if (active === null) active = freshMount()
+    return active
+  }
+
+  const depsChanged = (previous: unknown[] | undefined, next: unknown[] | undefined): boolean => {
+    if (previous === undefined || next === undefined) return true
+    if (previous.length !== next.length) return true
+    return previous.some((value, index) => !Object.is(value, next[index]))
+  }
+
+  const react = {
     createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({
       type,
       // children also ride props.children, as React does: the kit stand-in needs
@@ -51,9 +82,64 @@ function stubReact(): unknown {
       props: { ...(props as Record<string, unknown> | undefined), children },
       children,
     }),
-    useState: (initial: unknown) => [typeof initial === 'function' ? (initial as () => unknown)() : initial, noop],
-    useEffect: noop,
-    useRef: (initial: unknown) => ({ current: initial }),
+    useState: (initial: unknown) => {
+      const current = currentMountForRender()
+      const index = current.cursor
+      current.cursor += 1
+      // React's lazy initializer: a function is the initial value only when it
+      // is passed as the factory, so resolve it rather than storing the function.
+      if (index >= current.states.length) {
+        current.states[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+      }
+      const setter = (next: unknown): void => {
+        current.states[index] =
+          typeof next === 'function' ? (next as (prev: unknown) => unknown)(current.states[index]) : next
+      }
+      if (index >= current.setters.length) current.setters[index] = setter
+      return [current.states[index], current.setters[index]]
+    },
+    useEffect: (callback: () => unknown, deps?: unknown[]) => {
+      const current = currentMountForRender()
+      const slot = current.cursor
+      current.cursor += 1
+      const previous = current.effects[slot]
+      const run = (): void => {
+        current.effects[slot] = { deps, cleanup: (callback() as (() => void) | undefined) ?? undefined }
+      }
+      if (previous === undefined || depsChanged(previous.deps, deps)) run()
+    },
+    useRef: (initial: unknown) => {
+      const current = currentMountForRender()
+      const slot = current.cursor
+      current.cursor += 1
+      if (current.refs[slot] === undefined) current.refs[slot] = { current: initial }
+      return current.refs[slot]
+    },
+  }
+
+  return {
+    react,
+    /**
+     * Render a component, run its effects, let every pending promise settle,
+     * then render again so the tree reflects state the effects set.
+     * @param render - renders the component and returns its output.
+     * @returns the settled tree plus a function that renders once more.
+     */
+    async mountAndFlush<T>(render: () => T): Promise<{ tree: T; rerender: () => T }> {
+      const renderOnce = (): T => {
+        const current = currentMountForRender()
+        current.cursor = 0
+        return render()
+      }
+      renderOnce()
+      // Effects can queue more promises (a subscribe callback, a second read);
+      // flush until the component stops adding work.
+      for (let round = 0; round < 6; round += 1) {
+        await Promise.resolve()
+        await Promise.resolve()
+      }
+      return { tree: renderOnce(), rerender: renderOnce }
+    },
   }
 }
 
@@ -163,7 +249,7 @@ function recordingContext(): { ctx: unknown; sections: { options: Record<string,
   const sections: { options: Record<string, unknown> }[] = []
   const ctx = {
     effect: (callback: () => () => void) => callback(),
-    settingsScope: { bind: () => ({}) },
+    remote: { settings: fakeSettingsRemote(null).remote },
     slots: {
       inject: (_name: string, callback: () => unknown) => callback(),
       register: (options: Record<string, unknown>) => {
@@ -195,7 +281,7 @@ function localeContext(active: 'zh' | 'en'): {
       effects.push(label)
       return callback()
     },
-    settingsScope: { bind: () => ({}) },
+    remote: { settings: fakeSettingsRemote(null).remote },
     locale: {
       register: (ns: string, dicts: Dicts) => {
         registered.push({ ns, dicts })
@@ -218,38 +304,115 @@ function localeContext(active: 'zh' | 'en'): {
   return { ctx, sections, registered, effects }
 }
 
-/** Load the factory with a module table that answers the primitives entry as told. */
-async function moduleWith(primitives: unknown | 'missing'): Promise<ReturnType<Registration['factory']>> {
+/**
+ * Load the factory with a module table that answers the primitives entry as told.
+ *
+ * @param primitives - the kit to hand back for the primitives entry, or `'missing'`.
+ * @param react - the React double this module instance should use. Pass one in
+ * when the test needs to drive the component (a double created here would be
+ * invisible to the caller).
+ */
+async function moduleWith(
+  primitives: unknown | 'missing',
+  react?: unknown,
+): Promise<ReturnType<Registration['factory']>> {
   const registration = await loadClient()
   return registration.factory((name) => {
     if (name === PRIMITIVES) {
       if (primitives === 'missing') throw new Error(`client-modules: no module registered for ${name}`)
       return primitives
     }
-    return stubReact()
+    return react ?? createReactDouble().react
   })
 }
 
-/** The settings-scope snapshot and plugin context the section component needs. */
-function sectionContext(writable = true): unknown {
-  const snapshot = {
-    status: 'ready',
-    writable,
-    revision: 1,
-    value: { hooks: ['auth'], serialHooks: ['log', 'metrics'], log: '/tmp/hooks-ordering.log' },
-    base: { hooks: ['auth', 'retry'], serialHooks: ['log'] },
+/** One settings-entry view, in the shape the settings Remote answers with. */
+interface NamespaceView {
+  ns: string
+  schema?: unknown
+  value: unknown
+  revision: number
+  autoGenerate?: boolean
+  applies?: string
+}
+
+/** A fake `ctx.remote.settings`, recording the writes the page sends. */
+function fakeSettingsRemote(
+  view: NamespaceView | null,
+  { writable = true } = {},
+): { remote: Record<string, unknown>; calls: { ns: string; ops: unknown; revision: unknown }[] } {
+  const calls: { ns: string; ops: unknown; revision: unknown }[] = []
+  const remote = {
+    describe: async () => ({
+      writable,
+      hasDocument: true,
+      namespaces: view === null ? [] : [view],
+    }),
+    mutate: async (ns: string, ops: unknown, revision: unknown) => {
+      calls.push({ ns, ops, revision })
+      return view
+    },
+    $on: () => noop,
   }
+  return { remote, calls }
+}
+
+/** The plugin context the section component reads `ctx.remote` from. */
+function sectionContext(writable = true, view?: NamespaceView | null): unknown {
+  const entry: NamespaceView | null =
+    view === undefined
+      ? {
+          ns: 'hooks-ordering',
+          value: { hooks: ['auth'], serialHooks: ['log', 'metrics'], log: '/tmp/hooks-ordering.log' },
+          revision: 1,
+        }
+      : view
+  const { remote } = fakeSettingsRemote(entry, { writable })
   return {
     effect: (callback: () => () => void) => callback(),
-    settingsScope: {
-      bind: () => ({
-        getSnapshot: () => snapshot,
-        subscribe: () => noop,
-        mutate: () => Promise.resolve(),
-      }),
-    },
+    remote: { settings: remote },
     slots: { inject: (_name: string, callback: () => unknown) => callback(), register: () => noop },
   }
+}
+
+/**
+ * Props for {@link Registration.SettingsSection}: the plugin context plus the
+ * view the host already resolved. Against the real shell only `ctx` is passed
+ * (the page then reads the Remote); supplying `settingsSnapshot` is what a
+ * synchronous host — or a test — does.
+ */
+function sectionProps(writable = true, view?: NamespaceView | null): Record<string, unknown> {
+  const entry: NamespaceView | null =
+    view === undefined
+      ? {
+          ns: 'hooks-ordering',
+          value: { hooks: ['auth'], serialHooks: ['log', 'metrics'], log: '/tmp/hooks-ordering.log' },
+          revision: 1,
+        }
+      : view
+  return {
+    ctx: sectionContext(writable, view),
+    settingsSnapshot:
+      entry === null
+        ? { status: 'unavailable', writable: false, value: null, revision: undefined }
+        : { status: 'ready', writable, value: entry.value, revision: entry.revision },
+  }
+}
+
+/**
+ * Render a settings section twice over one mount.
+ *
+ * The first render runs the effects; the component seeds its editor draft from
+ * the snapshot in an effect, so only the second render shows the seeded
+ * controls. This mirrors React, which re-renders after an effect calls a
+ * setter.
+ *
+ * @param render - renders the component and returns its element tree.
+ * @returns the second render's tree.
+ */
+function renderSettingsSection<T>(render: () => T): T {
+  render()
+  return render()
 }
 
 describe('the client half', () => {
@@ -260,14 +423,25 @@ describe('the client half', () => {
 
   it('exposes apply + inject once the factory is called with require', async () => {
     const registration = await loadClient()
-    const mod = registration.factory(() => stubReact())
-    expect(mod.inject).toEqual(['slots', 'settingsScope', 'locale'])
+    const mod = registration.factory(() => createReactDouble().react)
+    expect(mod.inject).toEqual(['slots', 'remote', 'remote.settings', 'locale'])
     expect(typeof mod.apply).toBe('function')
+  })
+
+  it('never injects the removed `settingsScope` service', async () => {
+    // Regression: 0.1.7 removed `settingsScope`. While it was still named here
+    // cordis reported the plugin as `pending (waiting for service:
+    // settingsScope)` forever, the settings page never appeared, and the shell
+    // surfaced the whole composition as "Failed to load plugins".
+    const mod = (await loadClient()).factory(() => createReactDouble().react)
+    expect(mod.inject).not.toContain('settingsScope')
+    // The replacement is the settings Remote namespace.
+    expect(mod.inject).toContain('remote.settings')
   })
 
   it('contributes one settings page for the hooks-ordering namespace', async () => {
     const registration = await loadClient()
-    const mod = registration.factory(() => stubReact())
+    const mod = registration.factory(() => createReactDouble().react)
     const { ctx, sections } = recordingContext()
     mod.apply(ctx)
     expect(sections).toHaveLength(1)
@@ -282,7 +456,7 @@ describe('the client half', () => {
 
   it('registers a bilingual dictionary on the effect, under the settings namespace', async () => {
     const registration = await loadClient()
-    const mod = registration.factory(() => stubReact())
+    const mod = registration.factory(() => createReactDouble().react)
     const { ctx, registered, effects } = localeContext('zh')
     mod.apply(ctx)
     expect(registered).toHaveLength(1)
@@ -297,18 +471,18 @@ describe('the client half', () => {
   it('the nav label is a thunk through the bound translator, so it follows the locale', async () => {
     const registration = await loadClient()
     const en = localeContext('en')
-    registration.factory(() => stubReact()).apply(en.ctx)
+    registration.factory(() => createReactDouble().react).apply(en.ctx)
     expect((en.sections[0]!.options.label as () => string)()).toBe('Hook ordering')
 
     const zh = localeContext('zh')
-    registration.factory(() => stubReact()).apply(zh.ctx)
+    registration.factory(() => createReactDouble().react).apply(zh.ctx)
     expect((zh.sections[0]!.options.label as () => string)()).toBe('钩子排序')
   })
 
   it('falls back to Chinese and still registers when ctx.locale is absent', async () => {
     const registration = await loadClient()
     const { ctx, sections } = recordingContext()
-    registration.factory(() => stubReact()).apply(ctx)
+    registration.factory(() => createReactDouble().react).apply(ctx)
     expect(sections).toHaveLength(1)
     expect((sections[0]!.options.label as () => string)()).toBe('钩子排序')
   })
@@ -319,14 +493,14 @@ describe('the client half', () => {
     ;(ctx as { locale: { register: () => never } }).locale.register = () => {
       throw new Error('locale namespace "hooks-ordering" already has locale "zh"')
     }
-    registration.factory(() => stubReact()).apply(ctx)
+    registration.factory(() => createReactDouble().react).apply(ctx)
     expect(sections).toHaveLength(1)
     expect((sections[0]!.options.label as () => string)()).toBe('钩子排序')
   })
 
   it("every t('key') resolves in both dictionaries (a typo would show the key itself)", async () => {
     const registration = await loadClient()
-    const mod = registration.factory(() => stubReact())
+    const mod = registration.factory(() => createReactDouble().react)
     const source = readFileSync(new URL('../client.js', import.meta.url), 'utf8')
     const keys = [...source.matchAll(/\bt\('([A-Za-z0-9_]+)'/g)].map((match) => match[1]!)
     expect(keys.length).toBeGreaterThanOrEqual(10)
@@ -338,7 +512,7 @@ describe('the client half', () => {
 
   it('the English dictionary carries no leftover Chinese', async () => {
     const registration = await loadClient()
-    const mod = registration.factory(() => stubReact())
+    const mod = registration.factory(() => createReactDouble().react)
     const cjk = /[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/
     const leftover = Object.entries(mod.EN).filter(([, value]) => cjk.test(value))
     expect(leftover).toEqual([])
@@ -346,7 +520,7 @@ describe('the client half', () => {
 
   it('parses and compares the textarea form of a hook list', async () => {
     const registration = await loadClient()
-    const mod = registration.factory(() => stubReact())
+    const mod = registration.factory(() => createReactDouble().react)
     expect(mod.fromLines('a\n\n  b  \n')).toEqual(['a', 'b'])
     expect(mod.toLines(['a', 'b'])).toBe('a\nb')
     expect(mod.toLines(undefined)).toBe('')
@@ -365,8 +539,9 @@ describe('the shell primitives', () => {
 
   it('renders the actions and the single-line path field with the shell kit', async () => {
     const kit = fakePrimitives()
-    const mod = await moduleWith(kit)
-    const tree = mod.SettingsSection({ ctx: sectionContext() })
+    const react = createReactDouble()
+    const mod = await moduleWith(kit, react.react)
+    const tree = renderSettingsSection(() => mod.SettingsSection(sectionProps()))
 
     const buttons = collectByType(tree, kit.Button)
     expect(buttons.map(textOf)).toEqual(['保存', '恢复组合默认'])
@@ -399,8 +574,9 @@ describe('the shell primitives', () => {
 
   it('renders the read-only banner as a shell Tag and locks the controls', async () => {
     const kit = fakePrimitives()
-    const mod = await moduleWith(kit)
-    const tree = mod.SettingsSection({ ctx: sectionContext(false) })
+    const react = createReactDouble()
+    const mod = await moduleWith(kit, react.react)
+    const tree = renderSettingsSection(() => mod.SettingsSection(sectionProps(false)))
 
     const tags = collectByType(tree, kit.Tag)
     expect(tags).toHaveLength(1)
@@ -423,11 +599,12 @@ describe('the shell primitives', () => {
   })
 
   it('falls back to plain elements when the module table has no primitives, without throwing', async () => {
-    const mod = await moduleWith('missing')
+    const react = createReactDouble()
+    const mod = await moduleWith('missing', react.react)
     expect(mod.UI).toBeNull()
     expect(mod.UI_ERROR).toMatch(/no module registered/)
 
-    const tree = mod.SettingsSection({ ctx: sectionContext() })
+    const tree = renderSettingsSection(() => mod.SettingsSection(sectionProps()))
     const buttons = collectByType(tree, 'button')
     expect(buttons.map(textOf)).toEqual(['保存', '恢复组合默认'])
     expect(buttons[0]!.props.className).toBe('ho-fallback-btn ho-primary')
@@ -438,17 +615,17 @@ describe('the shell primitives', () => {
 
     // The failure status and the read-only banner still render, in plugin styling.
     expect(textOf(mod.saveFailedStatus('disk full'))).toContain('保存失败：disk full')
-    const readonly = mod.SettingsSection({ ctx: sectionContext(false) })
+    const readonly = renderSettingsSection(() => mod.SettingsSection(sectionProps(false)))
     expect(collectByType(readonly, 'span').map(textOf)).toContain('当前连接的设置存储是只读的。')
   })
 
   it('falls back when the module table entry is not the shell kit (shape check)', async () => {
     // The stand-in React has no Button/Tag/StateDot: a same-named entry that is
     // not the kit must count as "not available", never as "render undefined".
-    const mod = await moduleWith(stubReact())
+    const mod = await moduleWith(createReactDouble().react)
     expect(mod.UI).toBeNull()
     expect(mod.UI_ERROR).toBe('')
-    expect(collectByType(mod.SettingsSection({ ctx: sectionContext() }), 'button').map(textOf)).toEqual([
+    expect(collectByType(renderSettingsSection(() => mod.SettingsSection(sectionProps())), 'button').map(textOf)).toEqual([
       '保存',
       '恢复组合默认',
     ])
@@ -458,7 +635,7 @@ describe('the shell primitives', () => {
     const mod = await moduleWith('missing')
     const { ctx, sections } = recordingContext()
     mod.apply(ctx)
-    expect(mod.inject).toEqual(['slots', 'settingsScope', 'locale'])
+    expect(mod.inject).toEqual(['slots', 'remote', 'remote.settings', 'locale'])
     expect(sections).toHaveLength(1)
     expect(sections[0]!.options).toMatchObject({ name: 'settings.section', id: 'hooks-ordering', order: 27 })
   })

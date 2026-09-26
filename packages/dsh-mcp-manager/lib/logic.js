@@ -32,10 +32,11 @@ import Schema from '@deepseek-ai/schemastery'
 
 export const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
 
-// settings 命名空间 `mcp` 的 schema。settings 的每个命名空间必须是
-// 「键组成的对象」，所以服务器列表包在 `servers` 键下；字段全部带默认值，
-// transport 相关的必填性（stdio 要 command / http 要 url）在 HTTP 接口里做
-// 明确校验。
+// 本插件导出给 Cordis 的 Config schema（DSH 0.1.7 起 settings 由插件的
+// Config 投影而来，见下方 ServersSchema 的 volatile 说明）。settings 的每个
+// 命名空间必须是「键组成的对象」，所以服务器列表包在 `servers` 键下；字段
+// 全部带默认值，transport 相关的必填性（stdio 要 command / http 要 url）在
+// HTTP 接口里做明确校验。
 export const ServerSchema = Schema.object({
   serverName: Schema.string().pattern(SERVER_NAME_PATTERN),
   enabled: Schema.boolean().default(true),
@@ -57,8 +58,28 @@ export const ServerSchema = Schema.object({
   reconnectMaxAttempts: Schema.number().step(1).min(1).default(10),
 })
 
+// DSH 0.1.7 起 `ctx.settings.register(ns, schema)` 已被移除：settings 现在是
+// 「把每个 profile 条目自己的 Config schema 投影成表单」。所以服务器列表必须
+// 是本插件 **自己 Config 的字段**，而表单只投影带 `.volatile()` 的节点。
+//
+// volatile 必须标在 **`servers` 字段**上，不能标在根对象上：
+//   - `.volatile()` 的语义是「这个节点整体可被就地改写，不必重挂插件」。
+//     Loader 把它包成可变引用（`.get()` 读当前值），配置一改就
+//     `updateVolatile()` 就地写入，并发出 `loader/volatile-update`。
+//   - 标在根对象上会让**整个 Config 只剩一个引用、把所有字段的默认值一起吃掉**
+//     （实测 `resolveConfig` 得到 `servers: undefined`），所以服务器列表必须
+//     自己就是那个 volatile 节点。
+//   - 这与官方插件同构：dsh-llm-pi-ai 的
+//     `providers: z.dict(profile).default({}).volatile()`。
 export const ServersSchema = Schema.object({
-  servers: Schema.array(ServerSchema).default([]),
+  servers: Schema.array(ServerSchema).default([]).volatile(),
+  /**
+   * 覆盖「本条目在 profile 里的 loader 条目 id」。
+   *
+   * 只给非 loader 载体用（单测里手搭的内存 cordis 没有 loader 条目）。
+   * 正常组合留空：插件从 `ctx.fiber.entry.id` 现取，始终与 profile 里那一行一致。
+   */
+  entryId: Schema.string().description('覆盖 loader 条目 id（仅非 loader 载体需要）'),
 })
 
 // 把设置页的一台服务器配置翻译成 mcp-client 实例配置。只输出契约内的键；

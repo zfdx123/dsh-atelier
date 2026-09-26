@@ -58,9 +58,9 @@ function kitStub() {
     RiskConfirmation: marker('RiskConfirmation'),
     Button: marker('Button'),
     Tag: marker('Tag'),
-    IconPlusOutline16: marker('IconPlusOutline16'),
-    IconRefreshOutline16: marker('IconRefreshOutline16'),
-    IconChevronDownOutline14: marker('IconChevronDownOutline14'),
+    IconPlusOutline: marker('IconPlusOutline'),
+    IconRefreshOutline: marker('IconRefreshOutline'),
+    IconChevronDownOutline: marker('IconChevronDownOutline'),
   }
 }
 
@@ -258,13 +258,13 @@ function mount(opts: { withKit?: boolean } = {}) {
 const tick = () => new Promise((r) => setTimeout(r, 10))
 
 describe('设置页图标走外壳原子（构建产物 lib/client.js）', () => {
-  it('有原语：添加按钮是原生 Button + IconPlusOutline16，文案不带「＋」', async () => {
+  it('有原语：添加按钮是原生 Button + IconPlusOutline，文案不带「＋」', async () => {
     const h = mount()
     await h.start()
 
     const add = h.findAll((el) => el.type === h.kit.Button && el.props.variant === 'primary')
     assert.equal(add.length, 1, '添加按钮要渲染成原生 Button')
-    assert.equal(add[0]!.props.icon.type, h.kit.IconPlusOutline16, '图标走 Button 的 icon 通道')
+    assert.equal(add[0]!.props.icon.type, h.kit.IconPlusOutline, '图标走 Button 的 icon 通道')
     assert.deepEqual(add[0]!.children, ['添加'], '有图标时文案里不再有「＋」')
   })
 
@@ -284,13 +284,13 @@ describe('设置页图标走外壳原子（构建产物 lib/client.js）', () =>
     )
   })
 
-  it('有原语：刷新按钮是原生 Button + IconRefreshOutline16，文案不带「↻」', async () => {
+  it('有原语：刷新按钮是原生 Button + IconRefreshOutline，文案不带「↻」', async () => {
     const h = mount()
     await h.start()
 
     const refresh = h.findAll((el) => el.type === h.kit.Button && el.props.title === '刷新')
     assert.equal(refresh.length, 1, '刷新按钮要渲染成原生 Button')
-    assert.equal(refresh[0]!.props.icon.type, h.kit.IconRefreshOutline16)
+    assert.equal(refresh[0]!.props.icon.type, h.kit.IconRefreshOutline)
     assert.deepEqual(refresh[0]!.children, ['刷新'])
   })
 
@@ -325,7 +325,7 @@ describe('设置页图标走外壳原子（构建产物 lib/client.js）', () =>
     assert.deepEqual(chips[0]!.children, ['全局'])
   })
 
-  it('有原语：表单里「选择」按钮是原生 Button + IconChevronDownOutline14，文案不带「▾」', async () => {
+  it('有原语：表单里「选择」按钮是原生 Button + IconChevronDownOutline，文案不带「▾」', async () => {
     const h = mount()
     await h.start()
     await h.openForm()
@@ -338,7 +338,7 @@ describe('设置页图标走外壳原子（构建产物 lib/client.js）', () =>
     form = h.renderForm()
     const choose = h.findAll((el) => el.type === h.kit.Button && el.props.variant === 'ghost', form)
     assert.equal(choose.length, 1, '切到自定义项目后应出现「选择」按钮')
-    assert.equal(choose[0]!.props.icon.type, h.kit.IconChevronDownOutline14, '下拉箭头走 Button 的 icon 通道')
+    assert.equal(choose[0]!.props.icon.type, h.kit.IconChevronDownOutline, '下拉箭头走 Button 的 icon 通道')
     assert.deepEqual(choose[0]!.children, ['选择'])
   })
 

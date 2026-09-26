@@ -1,6 +1,6 @@
 // 宿主侧装配自检：用一个假的 Cordis 上下文跑 apply()，验证
 //   1. 模块能加载、apply 不抛错；
-//   2. settings 命名空间被注册；
+//   2. 本插件 Config 的 volatile 引用按 0.1.7 契约被读写；
 //   3. HTTP 路由被注册、且回环护栏按预期放行/拒绝；
 //   4. skill_manager 工具被注册，且 list / roots / create / 越界拒绝都符合预期。
 // 这个脚本不需要真实 DSH 进程，所以可以在改 profile 之前先确认插件是活的。
@@ -10,6 +10,8 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createVolatile, updateVolatile } from '@deepseek-ai/cosmokit'
+import Schema from '@deepseek-ai/schemastery'
 import * as plugin from '../index.js'
 
 /** 搭一个最小可用的假宿主，返回装配结果与辅助调用。 */
@@ -44,32 +46,50 @@ async function assemble() {
     if (conflictStyle === 'both') error.name = 'SettingsConflictError'
     return error
   }
+
+  // ── 0.1.7 的 Config + volatile 契约 ─────────────────────────────────────
+  // 真实 Loader 把标了 `.volatile()` 的节点换成一个可变引用（只有 `get()`），
+  // 普通字段保持普通值；写入时 `_commitVolatile` 把新值就地写进引用。
+  // 这里复刻这两件事：refs 是引用表，writeConfig 模拟一次 volatile 提交。
+  //
+  // 注意 section 里存的是**原始值**（不是引用）：`Schema.resolve` 的 volatile
+  // 快照会拒绝函数，把引用喂回去会得到 "volatile config cannot contain functions"。
+  const refs = new Map()
+  const resolvedConfig = {}
+  for (const [field, child] of Object.entries(plugin.Config.dict)) {
+    if (child.meta.volatile) {
+      const ref = createVolatile([])
+      refs.set(field, ref)
+      resolvedConfig[field] = ref
+    } else {
+      resolvedConfig[field] = plugin.Config({})[field]
+    }
+  }
+  const readRefs = () => Object.fromEntries([...refs].map(([field, ref]) => [field, ref.get()]))
+  /** 把一份 section 写进引用，返回归一化后的原始值。 */
+  const writeConfig = (section) => {
+    const resolved = Schema.resolve(section, plugin.Config, {})[0]
+    for (const [field, ref] of refs) updateVolatile(ref, resolved[field])
+    return readRefs()
+  }
+  stored = readRefs()
+
   const ctx = {
+    // 非 loader 载体：显式给出条目 id（真实运行时由 ctx.fiber.entry.id 提供）
+    fiber: { entry: { id: 'skill-manager' } },
     logger: { warn: (message) => warnings.push(String(message)) },
     settings: {
       get writable() {
         return writable
       },
-      // 忠实模拟真实契约：dsh-settings 的 resolve() 会执行 `schema(merged)`，
-      // 所以第二个参数必须是**可调用**的。之前这里直接把参数吞掉，导致
-      // 「传普通对象」这个致命错误一路逃到生产，让整个 profile 起不来。
-      // 现在传进来的不是函数就抛错——复刻真实的 "schema is not a function"。
-      register: (ns, schema) => {
-        if (typeof schema !== 'function') throw new TypeError('schema is not a function')
-        // 真的跑一遍解析：默认值缺失或类型不符会立刻暴露。
-        const resolved = schema({})
-        stored = resolved
-        registered.settings.push({ ns, schema, resolved })
-        return { ns }
-      },
-      get: () => stored,
-      describe: () =>
-        registered.settings.map((entry) => ({
-          ns: entry.ns,
-          schema: entry.schema.toJSON(),
-          value: stored,
+      describe: () => [
+        {
+          ns: 'skill-manager',
+          schema: plugin.Config.toJSON(),
+          value: readRefs(),
           revision,
-        })),
+        },
+      ],
       replace: async (ns, section, expectedRevision) => {
         if (!writable) throw new Error(`settings provider is read-only: "${ns}" cannot be updated in-process`)
         if (forceConflicts > 0) {
@@ -80,7 +100,8 @@ async function assemble() {
         if (expectedRevision !== undefined && expectedRevision !== revision) {
           throw conflictError(`settings "${ns}" moved from ${expectedRevision} to ${revision}`)
         }
-        stored = registered.settings[0].schema(section)
+        // 真实 replace 会 RESET 表单字段再设置提交值；这里提交的就是全部可编辑字段。
+        stored = writeConfig(section)
         revision += 1
       },
     },
@@ -128,7 +149,7 @@ async function assemble() {
       list: async () => registered.registryList,
     },
   }
-  plugin.apply(ctx)
+  plugin.apply(ctx, resolvedConfig)
   return {
     sandbox,
     project,
@@ -482,15 +503,13 @@ test('skill_manager 工具的写操作也让技能目录失效', async () => {
   }
 })
 
-test('apply() 注册 settings 命名空间、HTTP 路由、skill_manager 工具与技能提供者', async () => {
+test('apply() 挂上 Config、HTTP 路由、skill_manager 工具与技能提供者', async () => {
   const { sandbox, registered, warnings } = await assemble()
   try {
     assert.equal(plugin.name, 'dsh-skills-manager')
     assert.deepEqual(plugin.inject, ['settings'])
-    assert.deepEqual(
-      registered.settings.map((entry) => entry.ns),
-      [plugin.SETTINGS_NS],
-    )
+    // 0.1.7：不再注册命名空间；本插件自己的 Config 就是设置页的来源。
+    assert.equal(typeof plugin.Config, 'function')
     assert.deepEqual(
       registered.routes.map((route) => `${route.kind} ${route.path}`),
       [`exact ${plugin.API_PATH}`],
@@ -512,56 +531,49 @@ test('apply() 注册 settings 命名空间、HTTP 路由、skill_manager 工具�
   }
 })
 
-test('settings schema 是可调用的 schemastery 对象且默认值完整', async () => {
-  // 回归：dsh-settings 内部执行 `schema(merged)` 解析取值，设置页另读 `schema.toJSON()`。
-  // 传普通对象会让插件在装配阶段抛 "schema is not a function"，
+test('Config 是可调用的 schemastery 对象、默认值完整、根目录字段是 volatile', async () => {
+  // 回归：Cordis 的 resolveConfig 走 `schema['~standard'].validate`，设置页另读
+  // `schema.toJSON()`。传普通对象会让插件在装配阶段抛 "schema is not a function"，
   // 并以 "plugin tree failed to load" 的形式让**整个 profile 起不来**。
-  const { sandbox, registered } = await assemble()
+  const { sandbox } = await assemble()
   try {
-    const entry = registered.settings[0]
-    assert.equal(typeof entry.schema, 'function', 'schema 必须可调用')
-    assert.equal(typeof entry.schema.toJSON, 'function', 'schema 必须能 toJSON（设置页要读）')
-    assert.deepEqual(entry.resolved, {
-      customSkillDirs: [],
-      deepSkillDirs: [],
-      bundledSkillDir: '',
-      projects: [],
-      inventory: true,
-    })
+    const schema = plugin.Config
+    assert.equal(typeof schema, 'function', 'Config 必须可调用')
+    assert.equal(typeof schema.toJSON, 'function', 'Config 必须能 toJSON（设置页要读）')
+    // 可编辑的技能根目录必须是 volatile：0.1.7 的表单只投影 volatile 节点。
+    for (const field of ['customSkillDirs', 'deepSkillDirs', 'projects']) {
+      assert.equal(schema.dict[field].meta.volatile, true, `${field} 必须是 volatile（设置页唯一的可编辑面）`)
+    }
+    // 普通部署字段不该出现在表单里。
+    for (const field of ['bundledSkillDir', 'inventory']) {
+      assert.notEqual(schema.dict[field].meta.volatile, true, `${field} 是部署配置，不该做成可编辑字段`)
+    }
+    // 解析后的形状：volatile 字段是引用，普通字段是值。
+    const resolved = Schema.resolve({}, schema, {})[0]
+    assert.equal(typeof resolved.customSkillDirs.get, 'function')
+    assert.deepEqual(resolved.customSkillDirs.get(), [])
+    assert.deepEqual(resolved.deepSkillDirs.get(), [])
+    assert.deepEqual(resolved.projects.get(), [])
+    assert.equal(resolved.bundledSkillDir, '')
+    assert.equal(resolved.inventory, true)
     // 部分配置要被补全，而不是原样回传。
-    assert.deepEqual(entry.schema({ projects: ['E:/x'] }), {
-      customSkillDirs: [],
-      deepSkillDirs: [],
-      bundledSkillDir: '',
-      projects: ['E:/x'],
-      inventory: true,
-    })
-    // 多传的字段无害：readConfig 只读这三个键，类型也由 schema 保证。
-    const withExtra = entry.schema({ nope: 1, projects: ['E:/x'] })
-    assert.deepEqual(withExtra.projects, ['E:/x'])
-    assert.deepEqual(withExtra.customSkillDirs, [])
-    assert.equal(typeof withExtra.bundledSkillDir, 'string')
+    const partial = Schema.resolve({ projects: ['E:/x'] }, schema, {})[0]
+    assert.deepEqual(partial.projects.get(), ['E:/x'])
+    assert.deepEqual(partial.customSkillDirs.get(), [])
     // toJSON 必须能序列化（设置页据此渲染表单）。
-    assert.doesNotThrow(() => JSON.stringify(entry.schema.toJSON()))
+    assert.doesNotThrow(() => JSON.stringify(schema.toJSON()))
   } finally {
     await rm(sandbox, { recursive: true, force: true })
   }
 })
 
-test('settings.register 抛错时插件降级而不是拖垮整个 profile', async () => {
+test('settings 服务不可用时插件降级而不是拖垮整个 profile', async () => {
   // 一个可选的技能管理器不应该有能力阻止 profile 启动。
   const warnings = []
   const registered = { routes: [], tools: [] }
   const ctx = {
     logger: { warn: (message) => warnings.push(String(message)) },
-    settings: {
-      register: () => {
-        throw new TypeError('schema is not a function')
-      },
-      get: () => {
-        throw new Error('命名空间未注册，不应被调用')
-      },
-    },
+    settings: undefined,
     get: (name) =>
       name === 'webServer'
         ? {
@@ -583,11 +595,7 @@ test('settings.register 抛错时插件降级而不是拖垮整个 profile', asy
       factory()
     },
   }
-  assert.doesNotThrow(() => plugin.apply(ctx), 'apply 不能因为 settings 注册失败而抛错')
-  assert.equal(
-    warnings.some((message) => message.includes('设置命名空间注册失败')),
-    true,
-  )
+  assert.doesNotThrow(() => plugin.apply(ctx, {}), 'apply 不能因为没有 settings 服务而抛错')
   // 降级后路由与工具仍然注册。
   assert.equal(registered.routes.length, 1)
   assert.equal(registered.tools.length, 1)

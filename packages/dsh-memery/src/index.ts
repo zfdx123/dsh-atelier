@@ -83,8 +83,13 @@ function createSnapshotMessage(text: string, dir: string): ReturnType<typeof cre
   return createUserMessage({
     content: [{ type: 'text', text }],
     source: {
-      kind: 'plugin',
-      plugin: 'dsh-memery',
+      // The kind must be the PRODUCER's own. The v3 `{kind:'plugin', plugin}`
+      // wrapper was retired in session format v4: its admission check refuses a
+      // bare `'plugin'` with "format v4 message requires a producer-owned source
+      // kind" and fails the whole send. `plugin:<package>` is the same string
+      // the v3→v4 migration derives for a released third-party wrapper, so a
+      // migrated session and a freshly injected one carry identical attribution.
+      kind: 'plugin:dsh-memery',
       form: 'snapshot',
       sections: [{ name: '长期记忆', text }],
     },

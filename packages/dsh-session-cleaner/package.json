@@ -1,6 +1,6 @@
 {
   "name": "@zfdx123/dsh-session-cleaner",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "会话清理：在运行中的 web 运行时里彻底删除 DSH 会话——实时 store 条目、工作区记录、磁盘产物与投影缓存行一并清掉，并在会话行菜单里加一个删除入口。",
   "license": "MIT",
   "homepage": "https://github.com/zfdx123/dsh-atelier/tree/main/packages/dsh-session-cleaner#readme",
@@ -31,14 +31,14 @@
   ],
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
-    "dsh": "^0.1.6-alpha.1"
+    "dsh": "^0.1.7-rc.2"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-agent": "^0.1.6-alpha.1",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.6-alpha.1",
-    "@deepseek-ai/dsh-session": "^0.1.6-alpha.1",
-    "@deepseek-ai/dsh-workspace": "^0.1.6-alpha.1"
+    "@deepseek-ai/dsh-agent": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-session": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-workspace": "^0.1.7-rc.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-agent": {

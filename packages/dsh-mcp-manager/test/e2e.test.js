@@ -17,6 +17,8 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context, Service } from '@deepseek-ai/cordis'
+import Schema from '@deepseek-ai/schemastery'
+import { createVolatile, isVolatile, updateVolatile } from '@deepseek-ai/cosmokit'
 import * as Manager from '../index.js'
 
 if (!Promise.withResolvers) {
@@ -56,78 +58,58 @@ const STDIO = (name, extra = {}) => ({
 
 // ── 假服务 ───────────────────────────────────────────────────────────────
 
-// 最小 settings 服务：register/get/replace（带 rev + 冲突）/describe，
-// replace 提交后按 dsh-settings 语义 emit settings/updated（值变化才发）。
+// 最小 settings 服务，按 DSH 0.1.7 契约：表单按 **loader 条目 id** 定位
+// （不再有 register(ns, schema)），describe() 报告每个条目的 schema/值/修订号，
+// replace(ns, section, rev) 写入并按 SETTINGS_CONFLICT 拒绝过期修订。
+//
+// 写入后按 Loader 的真实行为把新值就地写进 volatile 引用（updateVolatile 语义）
+// 并发出 loader/volatile-update —— 插件正是靠它感知配置变化。
 class FakeSettings extends Service {
-  registrations = new Map()
-  document = {}
+  /** @type {Map<string, {ns: string, document: unknown, revision: number, ref: object}>} */
+  entries = new Map()
+
+  constructor(ctx) {
+    super(ctx, 'settings')
+  }
 
   /**
-   * @param {object} ctx
-   * @param {{hideNsField?: boolean}} [options] hideNsField 模拟上游把描述符
-   *   字段 `ns` 改名（dsh-settings README 已把 ns→namespace 列为 TODO）：此时
-   *   describe() 按字段名找不到本命名空间，只剩 settings/document-updated
-   *   推送里还带着修订号。
+   * 登记一个条目，引用取 Loader 真正交给插件的那一个（`fiber.config.servers`，
+   * 由 cordis 从**原始** config 解析出来的 volatile 引用）。
+   * @param {string} ns profile 条目 id
+   * @param {object} ref volatile 引用
    */
-  constructor(ctx, options = {}) {
-    super(ctx, 'settings')
-    this.hideNsField = options.hideNsField === true
+  adopt(ns, ref) {
+    this.entries.set(ns, { ns, document: ref.get(), revision: 0, ref })
   }
-
-  register(ns, schema) {
-    if (this.registrations.has(ns)) throw new Error(`settings namespace "${ns}" is already registered`)
-    const registration = {
-      ns,
-      schema,
-      resolved: schema(this.document[ns]),
-      revision: 0,
-    }
-    this.ctx.effect(
-      () => {
-        this.registrations.set(ns, registration)
-        return () => this.registrations.delete(ns)
-      },
-      `settings.register(${JSON.stringify(ns)})`,
-    )
-    return { get: () => registration.resolved, replace: (section) => this.replace(ns, section) }
-  }
-
-  get(ns) {
-    return this.registrations.get(ns)?.resolved
-  }
-
   describe() {
-    return [...this.registrations.values()].map((r) =>
-      this.hideNsField ? { revision: r.revision } : { ns: r.ns, revision: r.revision },
-    )
+    return [...this.entries.values()].map((entry) => ({
+      ns: entry.ns,
+      schema: entry.schema,
+      value: entry.document,
+      revision: entry.revision,
+      autoGenerate: true,
+      applies: 'live',
+    }))
   }
 
   async replace(ns, section, expectedRevision) {
-    const registration = this.registrations.get(ns)
-    if (!registration) throw new Error(`settings namespace "${ns}" is not registered`)
-    if (expectedRevision !== undefined && expectedRevision !== registration.revision) {
+    const entry = this.entries.get(ns)
+    if (entry === undefined) throw new Error(`settings entry "${ns}" does not exist`)
+    if (expectedRevision !== undefined && expectedRevision !== entry.revision) {
       const error = new Error(
-        `settings namespace "${ns}" changed since it was read (expected revision ${expectedRevision}, now ${registration.revision})`,
+        `settings entry "${ns}" changed since it was read (expected revision ${expectedRevision}, now ${entry.revision})`,
       )
       error.name = 'SettingsConflictError'
       error.code = 'SETTINGS_CONFLICT'
-      error.expected = expectedRevision
-      error.actual = registration.revision
       throw error
     }
-    const before = this.document[ns]
-    this.document[ns] = section
-    const next = registration.schema(section)
-    if (JSON.stringify(before) !== JSON.stringify(section)) {
-      registration.revision += 1
-      // dsh-settings 的真实语义：原始分节变化时发 document-updated(ns, revision)
-      this.ctx.emit('settings/document-updated', ns, registration.revision)
-    }
-    if (JSON.stringify(next) !== JSON.stringify(registration.resolved)) {
-      registration.resolved = next
-      this.ctx.emit('settings/updated', ns, next)
-    }
-    return next
+    entry.document = section
+    entry.revision += 1
+    this.ctx.emit('settings/document-updated', ns, entry.revision)
+    // Loader 的 volatile 提交：新值就地写进引用，再通知本 fiber。
+    writeServersRef(entry.ref, section.servers ?? [])
+    this.ctx.emit('loader/volatile-update', [[]])
+    return entry.document
   }
 }
 
@@ -259,14 +241,51 @@ function readAll(req) {
 
 // ── 测试主体 ─────────────────────────────────────────────────────────────
 
-function buildHarness({ withConnection = true, settingsOptions = {} } = {}) {
+/** 测试用的 profile 条目 id（0.1.7 的表单按它定位）。 */
+const TEST_ENTRY_ID = 'mcp-manager'
+
+/**
+ * 把新值就地写进 volatile 引用，等价于 Loader 的 `updateVolatile(ref, source)`。
+ * @param {object} ref 目标 volatile 引用
+ * @param {Array<object>} servers 新值（原始数组，默认值由 schema 补齐）
+ */
+function writeServersRef(ref, servers) {
+  updateVolatile(ref, createVolatile(Schema.resolve({ servers }, Manager.Config, {})[0].servers.get()))
+}
+
+/**
+ * 装配一个内存 harness。插件在这里就装载好，调用方拿 `disposer` 收尾。
+ *
+ * 关键：config 传的是**原始数组**（`{ servers }`），volatile 引用由 cordis 自己
+ * 从原始 config 解析出来 —— 与 Loader 的真实行为一致。解析完成后把
+ * `fiber.config.servers` 这个引用交给 FakeSettings，写入时才对同一个引用生效。
+ */
+function buildHarness({ withConnection = true, servers = [] } = {}) {
   const app = new Context()
-  const settings = new FakeSettings(app, settingsOptions)
+  const settings = new FakeSettings(app)
   const tools = new FakeTools(app)
   const webServer = new FakeWebServer(app)
   const connection = withConnection ? new FakeConnection(app) : null
   if (connection) app.effect(() => connection.mount(webServer), 'test: /api carrier')
-  return { app, settings, tools, webServer, connection }
+  const disposer = app.plugin(Manager, { servers, entryId: TEST_ENTRY_ID })
+  return {
+    app,
+    settings,
+    tools,
+    webServer,
+    connection,
+    disposer,
+    /** 等插件装载完成后登记 volatile 引用与 loader 条目 id，供写入路径使用。 */
+    async ready() {
+      await disposer.await()
+      // 真实 harness 里 fiber.entry 由 loader 提供；这里补上同形的条目，
+      // 让插件按条目 id 定位表单（0.1.7 契约）。
+      const ref = disposer.config.servers
+      if (!isVolatile(ref)) throw new Error('buildHarness: fiber.config.servers 应当是 volatile 引用')
+      settings.adopt(TEST_ENTRY_ID, ref)
+      return disposer
+    },
+  }
 }
 
 async function waitFor(fn, { timeout = 10000, interval = 50, label = '条件' } = {}) {
@@ -287,6 +306,7 @@ async function request(base, method, body, { auth = true } = {}) {
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const data = await response.json()
+  if (process.env.DBG_REQ) console.log('DBG', method, response.status, JSON.stringify(data).slice(0, 400))
   return { status: response.status, data }
 }
 
@@ -303,7 +323,8 @@ describe('端到端：保存即生效（内存 cordis + 假 stdio MCP 服务器�
   before(async () => {
     harness = buildHarness()
     harness.app.logger.exporter({ levels: { default: 3 }, export: (m) => logs.push(String(m.args?.[0] ?? '')) })
-    disposer = harness.app.plugin(Manager)
+    disposer = harness.disposer
+    await harness.ready()
     base = `http://127.0.0.1:${await harness.webServer.listen()}/api/mcp/servers`
   })
 
@@ -486,7 +507,8 @@ describe('端到端：整条命令行粘进表单也能跑通（真实故障回�
     harness = buildHarness()
     // 收集插件写出的告警，断言归一化确实发生过（而不是静默改写用户配置）
     harness.app.logger.exporter({ levels: { default: 3 }, export: (m) => logs.push(String(m.args?.[0] ?? '')) })
-    disposer = harness.app.plugin(Manager)
+    disposer = harness.disposer
+    await harness.ready()
     base = `http://127.0.0.1:${await harness.webServer.listen()}/api/mcp/servers`
   })
 
@@ -561,7 +583,8 @@ describe('端到端：没有 connection 服务时的兜底载体（裸 webServer
 
   before(async () => {
     harness = buildHarness({ withConnection: false })
-    disposer = harness.app.plugin(Manager)
+    disposer = harness.disposer
+    await harness.ready()
     base = `http://127.0.0.1:${await harness.webServer.listen()}/api/mcp/servers`
   })
 
@@ -599,12 +622,14 @@ describe('端到端：connection 服务后到（组合时序兜底）', () => {
 
   before(async () => {
     app = new Context()
-    new FakeSettings(app)
+    const settings = new FakeSettings(app)
     tools = new FakeTools(app)
     webServer = new FakeWebServer(app)
     // 插件先装载：此刻 connection 还不存在，于是先走裸路由兜底
-    disposer = app.plugin(Manager)
+    disposer = app.plugin(Manager, { servers: [], entryId: TEST_ENTRY_ID })
     await waitFor(() => webServer.routes.has('exact /api/mcp/servers'), { label: '兜底路由注册' })
+    await disposer.await()
+    settings.adopt(TEST_ENTRY_ID, disposer.config.servers)
     // connection 稍后才出现（装配顺序变化时就是这个形态）
     connection = new FakeConnection(app)
     app.effect(() => connection.mount(webServer), 'test: /api carrier')
@@ -649,7 +674,8 @@ describe('端到端：启动前置检查的判定在异步失败之后仍然保�
   before(async () => {
     harness = buildHarness()
     harness.app.logger.exporter({ levels: { default: 3 }, export: (m) => logs.push(String(m.args?.[0] ?? '')) })
-    disposer = harness.app.plugin(Manager)
+    disposer = harness.disposer
+    await harness.ready()
     base = `http://127.0.0.1:${await harness.webServer.listen()}/api/mcp/servers`
   })
 
@@ -726,14 +752,15 @@ describe('端到端：启动前置检查的判定在异步失败之后仍然保�
   })
 })
 
-describe('端到端：settings 描述符字段被改名时仍能拿到修订号（上游预告的 ns→namespace）', () => {
+describe('端到端：修订号乐观锁（0.1.7 表单按 loader 条目 id 定位）', () => {
   let harness
   let base
   let disposer
 
   before(async () => {
-    harness = buildHarness({ settingsOptions: { hideNsField: true } })
-    disposer = harness.app.plugin(Manager)
+    harness = buildHarness()
+    disposer = harness.disposer
+    await harness.ready()
     base = `http://127.0.0.1:${await harness.webServer.listen()}/api/mcp/servers`
   })
 
@@ -742,14 +769,23 @@ describe('端到端：settings 描述符字段被改名时仍能拿到修订号�
     await disposer.dispose()
   })
 
-  it('GET 返回的是真实修订号（退回推送值），而不是永远 0', async () => {
+  it('服务只按 loader 条目 id 登记（没有条目 id 就没有表单）', () => {
+    const descriptors = harness.settings.describe()
+    assert.deepEqual(
+      descriptors.map((entry) => entry.ns),
+      [TEST_ENTRY_ID],
+      `表单必须登记在 loader 条目 id 上，实际 ${JSON.stringify(descriptors.map((entry) => entry.ns))}`,
+    )
+  })
+
+  it('GET 返回的是真实修订号，而不是永远 0', async () => {
     const first = await request(base, 'POST', { servers: [STDIO('renamed')] })
     assert.equal(first.status, 200)
     const get = await request(base, 'GET')
     assert.equal(
       get.data.rev,
       1,
-      `描述符读不到时应退回 settings/document-updated 推送的修订号，实际 ${JSON.stringify(get.data)}`,
+      `保存一次后修订号应为 1（describe 的 revision），实际 ${JSON.stringify(get.data)}`,
     )
   })
 

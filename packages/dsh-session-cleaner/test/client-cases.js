@@ -62,12 +62,12 @@ function primitivesStub(kit, calls) {
     Button: (props) => ({ type: 'Button', props }),
   }
   if (kit === 'full') {
-    stub.IconSearchOutline16 = icon('IconSearchOutline16')
-    stub.IconChevronDownOutline14 = icon('IconChevronDownOutline14')
-    stub.IconTrashOutline16 = icon('IconTrashOutline16')
+    stub.IconSearchOutline = icon('IconSearchOutline')
+    stub.IconChevronDownOutline = icon('IconChevronDownOutline')
+    stub.IconTrashOutline = icon('IconTrashOutline')
   }
   // A partial kit still ships what the dialog needs; only its icons are short.
-  if (kit === 'partial') stub.IconSearchOutline16 = icon('IconSearchOutline16')
+  if (kit === 'partial') stub.IconSearchOutline = icon('IconSearchOutline')
   return stub
 }
 
@@ -1000,12 +1000,12 @@ export const clientCases = [
       })
 
       const search = glyphOf(searchBox(harness.tree()))
-      assert.equal(search?.props?.['data-kit'], 'IconSearchOutline16', 'the search glyph comes from the kit')
+      assert.equal(search?.props?.['data-kit'], 'IconSearchOutline', 'the search glyph comes from the kit')
       assert.equal(search.props.width, 16, 'at the size it has always had')
       assert.equal(searchBox(harness.tree()).props['aria-hidden'], true, 'and stays decorative')
 
       const chevron = glyphOf(chevronBox(harness.tree(), 'w1'))
-      assert.equal(chevron?.props?.['data-kit'], 'IconChevronDownOutline14', 'the fold glyph comes from the kit')
+      assert.equal(chevron?.props?.['data-kit'], 'IconChevronDownOutline', 'the fold glyph comes from the kit')
       assert.equal(chevronBox(harness.tree(), 'w1').props.style.transform, 'none', 'an open group sits unrotated')
       fold(harness, 'w1')
       assert.equal(
@@ -1029,7 +1029,7 @@ export const clientCases = [
       const names = harness.calls.filter((call) => call.kind === 'kit-icon').map((call) => call.name)
       assert.deepEqual(
         [...new Set(names)].sort(),
-        ['IconChevronDownOutline14', 'IconSearchOutline16', 'IconTrashOutline16'],
+        ['IconChevronDownOutline', 'IconSearchOutline', 'IconTrashOutline'],
         'all three glyphs come from the kit',
       )
 

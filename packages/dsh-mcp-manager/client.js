@@ -40,7 +40,7 @@ window.__ModuleLoader__.load({
         '在这里配置给我用的 MCP 服务器（Model Context Protocol）。保存后立即生效，每台服务器可单独「开启/关闭」：我会拿到 mcp__<名称>__<工具名> 形式的工具。',
       empty: '还没有配置任何 MCP 服务器。',
       // addServer 自带全角 ＋：拿不到外壳图标时它就是那个加号。拿得到图标时改用
-      // addServerNoIcon，字形交给 IconPlusOutline16 画（否则一个加号画两遍）。
+      // addServerNoIcon，字形交给 IconPlusOutline 画（否则一个加号画两遍）。
       addServer: '＋ 添加服务器',
       addServerNoIcon: '添加服务器',
       refresh: '刷新',
@@ -922,7 +922,7 @@ window.__ModuleLoader__.load({
                 button(
                   {
                     key: 'edit',
-                    icon: iconNode('IconEditOutline16'),
+                    icon: iconNode('IconEditOutline'),
                     disabled: busy,
                     onClick: function () {
                       props.onEdit(server)
@@ -934,7 +934,7 @@ window.__ModuleLoader__.load({
                   {
                     key: 'delete',
                     danger: true,
-                    icon: iconNode('IconTrashOutline16'),
+                    icon: iconNode('IconTrashOutline'),
                     disabled: busy,
                     onClick: function () {
                       props.onAsk(server, 'delete')
@@ -1252,9 +1252,9 @@ window.__ModuleLoader__.load({
         })
       })
 
-      // 「添加服务器」的加号：外壳这一版有 IconPlusOutline16 就交给它画，否则留给字典
+      // 「添加服务器」的加号：外壳这一版有 IconPlusOutline 就交给它画，否则留给字典
       // 文案里的全角 ＋（两条路都只用一次加号，见下面的按钮）。
-      var addIcon = iconNode('IconPlusOutline16')
+      var addIcon = iconNode('IconPlusOutline')
 
       return e(
         'div',
@@ -1294,7 +1294,7 @@ window.__ModuleLoader__.load({
               },
               addIcon === null ? t('addServer') : t('addServerNoIcon'),
             ),
-        e('div', { style: S.actions }, button({ icon: iconNode('IconRefreshOutline16'), onClick: load }, t('refresh'))),
+        e('div', { style: S.actions }, button({ icon: iconNode('IconRefreshOutline'), onClick: load }, t('refresh'))),
       )
     }
 

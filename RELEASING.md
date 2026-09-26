@@ -2,7 +2,7 @@
 
 ## 版本规则
 
-**7 个插件共用一个版本号**（当前 `1.0.3`），`scripts/release-check.mjs` 会强制这一点
+**7 个插件共用一个版本号**（当前 `1.0.5`），`scripts/release-check.mjs` 会强制这一点
 ——每个 `packages/*/package.json` 的 `version` 必须**等于** `PLUGIN_VERSION`。
 meta 包 `@zfdx123/dsh-atelier` 的 7 个依赖也必须写成 `^<插件版本>`。
 
@@ -63,9 +63,15 @@ node scripts/publish-local.mjs                # 其余全部（含入口包，�
 ## 日常发布（打 tag → 暂存 → 你批准）
 
 ```sh
-git tag v1.0.3
-git push origin v1.0.3
+git tag v1.0.5
+git push origin v1.0.5
 ```
+
+> **tag 打的是插件版本**，不是入口包版本。发布作业逐个比对
+> `packages/*/package.json` 的 `version` 与 tag：等于 tag 的进暂存区，其余
+> 打印为「已发布，跳过」。所以 7 个插件在 `1.0.5`、入口包在 `1.0.6` 时，
+> `v1.0.5` 只发那 7 个；入口包等它自己那一版再打一个 tag（重复打 tag 是安全的，
+> 已发布的会被跳过）。
 
 `.github/workflows/release.yml` 会：
 

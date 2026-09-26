@@ -3,6 +3,7 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import Schema from '@deepseek-ai/schemastery'
 import {
   SERVER_NAME_PATTERN,
   ServersSchema,
@@ -14,6 +15,20 @@ import {
   substituteSecretRefs,
   SECRET_REF_PATTERN,
 } from '../lib/logic.js'
+
+/**
+ * 按 Loader 的方式解析本插件的 Config，返回归一化后的服务器列表。
+ *
+ * 不能直接调 `ServersSchema(raw)`：`servers` 是 volatile 节点，Loader（与
+ * cordis 的 resolveConfig）走的是 `Schema.resolve`，它才会把该节点换成一个
+ * 携带 schema 默认值的可变引用。这里复刻那条路径。
+ * @param {object} raw 原始 config
+ * @returns {Array<object>} 归一化后的服务器列表
+ */
+function resolveServers(raw) {
+  const ref = Schema.resolve(raw, ServersSchema, {})[0].servers
+  return ref.get()
+}
 
 describe('SERVER_NAME_PATTERN', () => {
   const valid = ['github', 'my_db', 'a-b', 'a1B_-', '0', 'x'.repeat(32)]
@@ -31,23 +46,23 @@ describe('SERVER_NAME_PATTERN', () => {
   }
 })
 
-describe('ServersSchema（settings 命名空间契约）', () => {
+describe('ServersSchema（插件 Config 契约）', () => {
   it('空对象归一化为空列表', () => {
-    assert.deepEqual(ServersSchema({}).servers, [])
+    assert.deepEqual(resolveServers({}), [])
   })
 
   it('保留用户的 enabled: false（开关状态持久化契约）', () => {
-    const value = ServersSchema({
+    const value = resolveServers({
       servers: [{ serverName: 'srv', transport: 'stdio', command: 'echo hi', enabled: false }],
     })
-    assert.equal(value.servers[0].enabled, false)
+    assert.equal(value[0].enabled, false)
   })
 
   it('缺失字段按默认值补齐', () => {
-    const value = ServersSchema({
+    const value = resolveServers({
       servers: [{ serverName: 'srv', transport: 'stdio', command: 'echo hi' }],
     })
-    const server = value.servers[0]
+    const server = value[0]
     assert.equal(server.enabled, true)
     assert.deepEqual(server.args, [])
     assert.deepEqual(server.env, {})
@@ -64,7 +79,7 @@ describe('ServersSchema（settings 命名空间契约）', () => {
   })
 
   it('可配置项（超时/启动失败即报错）随 schema 归一化', () => {
-    const value = ServersSchema({
+    const value = resolveServers({
       servers: [
         {
           serverName: 'srv',
@@ -75,12 +90,12 @@ describe('ServersSchema（settings 命名空间契约）', () => {
         },
       ],
     })
-    assert.equal(value.servers[0].toolCallTimeoutMs, 5000)
-    assert.equal(value.servers[0].failOnStartupError, true)
+    assert.equal(value[0].toolCallTimeoutMs, 5000)
+    assert.equal(value[0].failOnStartupError, true)
   })
 
   it('TLS / 重连字段随 schema 归一化', () => {
-    const value = ServersSchema({
+    const value = resolveServers({
       servers: [
         {
           serverName: 'srv',
@@ -93,7 +108,7 @@ describe('ServersSchema（settings 命名空间契约）', () => {
         },
       ],
     })
-    const server = value.servers[0]
+    const server = value[0]
     assert.equal(server.tlsInsecure, true)
     assert.equal(server.tlsCaFile, 'C:\\certs\\ca.pem')
     assert.equal(server.reconnectEnabled, false)

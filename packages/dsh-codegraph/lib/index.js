@@ -69,9 +69,10 @@
 //     `exitCode` (null = signal death, executor timeout, or caller abort —
 //     never a code to print); see `exitFailureText`.
 //   - `agent/inbox/inserted` plus `agent.inbox.nextTurn`, `agent.steer(msg)`,
-//     and `createUserMessage({ content, source })` whose `source` must be
-//     `{ kind: 'plugin', plugin, form: 'notice', summary }` — never
-//     `{ kind: 'user' }` for machine-injected context.
+//     and `createUserMessage({ content, source })` whose `source` must carry a
+//     PRODUCER-owned kind (`plugin:<package>` here) — never `{ kind: 'user' }`
+//     for machine-injected context, and never the retired v3 `{ kind: 'plugin' }`
+//     wrapper, which session format v4 refuses at admission.
 //   - `exec.agent.session.header.cwd` as the default project root.
 
 import { existsSync } from 'node:fs'
@@ -795,9 +796,16 @@ export function apply(ctx, config = {}) {
           // user source makes this 12KB auto-injection indistinguishable from
           // something the user typed. `form: 'notice'` is the matching shape for
           // a one-off account, and carries the required one-line summary.
+          //
+          // The kind must be the PRODUCER's own, and `'plugin'` is refused: the
+          // v3 `{kind: 'plugin', plugin}` wrapper was retired in session format
+          // v4, whose admission check rejects a bare `'plugin'` with "format v4
+          // message requires a producer-owned source kind" and fails the whole
+          // send. `plugin:<package>` is the same string the v3→v4 migration
+          // derives for a released third-party wrapper, so a migrated session
+          // and a freshly injected one carry identical attribution.
           source: {
-            kind: 'plugin',
-            plugin: name,
+            kind: `plugin:${name}`,
             form: 'notice',
             summary: 'CodeGraph structural context pre-loaded for this prompt',
           },
