@@ -346,6 +346,73 @@
         return style
       }
 
+      /**
+       * The name this plugin's settings entry actually has, resolved at runtime
+       * from the descriptors the host returns.
+       *
+       * It CANNOT be a constant. The settings namespace is the **loader entry
+       * id**, which belongs to whoever wrote the row that mounted this plugin,
+       * not to the plugin: the aggregator's `cordis.patch.yml` uses
+       * `dsh-plugin-hooks-ordering`, while this package's own patch uses
+       * `hooks-ordering`. Hardcoding the latter against the former produced
+       *
+       *   no settings entry is named "hooks-ordering" (describe() returned: …, dsh-plugin-hooks-ordering, …)
+       *
+       * and the write path was refused outright:
+       *
+       *   settings/rejected: No configurable plugin entry "hooks-ordering"
+       *
+       * Matching on the descriptor's own `ns` removes the guesswork: whatever id
+       * the mounting row has, this is the entry it produced.
+       */
+      var resolvedNs = null
+
+      /**
+       * Normalise a Remote answer to `{ ok, value }` / `{ ok: false, reason }`.
+       *
+       * The 0.1.7 Remote protocol answers every call with a `RemoteResult`
+       * envelope and the client proxy hands that envelope through as-is, so a
+       * caller that reads fields off the answer directly sees `undefined` while
+       * the wire traffic is healthy. A plain value is accepted too, so this
+       * keeps working if a future runtime unwraps for us.
+       *
+       * @param answer - whatever the Remote call resolved to.
+       * @returns the unwrapped outcome.
+       */
+      function unwrapRemote(answer) {
+        if (answer !== null && typeof answer === 'object' && typeof answer.ok === 'boolean') {
+          if (answer.ok === false) {
+            var failure = answer.error
+            var reason =
+              failure && typeof failure === 'object'
+                ? String(failure.code || 'remote error') + ': ' + String(failure.message || '')
+                : String(failure || 'remote error')
+            return { ok: false, reason: reason }
+          }
+          return { ok: true, value: answer.value }
+        }
+        return { ok: true, value: answer }
+      }
+
+      /**
+       * @param list - descriptor list from `describe()`.
+       * @returns the descriptor for this plugin, or undefined.
+       */
+      function pickEntry(list) {
+        // Fast path: the row used this package's own documented id.
+        var direct = list.find(function (entry) {
+          return entry && entry.ns === NS
+        })
+        if (direct !== undefined) return direct
+        // Otherwise take the entry that was mounting this plugin created.
+        // `dsh-plugin-hooks-ordering` is the shipped aggregator row; the suffix
+        // test also covers a user's own row name.
+        var suffixed = list.filter(function (entry) {
+          return entry && typeof entry.ns === 'string' && entry.ns.slice(-NS.length) === NS
+        })
+        return suffixed.length === 1 ? suffixed[0] : undefined
+      }
+
       // ── the settings page ──────────────────────────────────────────────────
 
       /**
@@ -397,6 +464,12 @@
       function createSettingsSource(ctx) {
         var remote = ctx && ctx.remote && ctx.remote.settings
         /**
+         * The name this plugin's settings entry actually has is resolved at
+         * runtime by {@link pickEntry} into the module-level `resolvedNs`; see
+         * the note there for why it cannot be a constant.
+         */
+
+        /**
          * Why the form has no data. Kept as a concrete, user-visible string:
          * "not available" on its own made a wiring fault indistinguishable from
          * a not-yet-mounted host half, and that cost a lot of blind debugging.
@@ -431,17 +504,27 @@
               return remote.describe()
             })
             .then(function (answer) {
-              var list = answer && Array.isArray(answer.namespaces) ? answer.namespaces : null
+              // A Remote call answers with a `RemoteResult` envelope
+              // (`{ok:true, value}` / `{ok:false, error}`) and the client proxy
+              // does NOT unwrap it: reading `answer.namespaces` directly got
+              // `undefined`, which surfaced as the misleading
+              // "describe() returned no namespaces array" while the network
+              // exchange was perfectly healthy (ok:true, 20 namespaces).
+              var result = unwrapRemote(answer)
+              if (result.ok === false) {
+                return unavailableBecause('describe() failed: ' + result.reason)
+              }
+              var value = result.value
+              if (value === null || value === undefined) {
+                return unavailableBecause('describe() returned no value')
+              }
+              var list = Array.isArray(value.namespaces) ? value.namespaces : null
               if (list === null) {
-                return unavailableBecause('describe() returned no namespaces array')
+                return unavailableBecause(
+                  'describe() value has no namespaces array (keys: ' + Object.keys(value).join(', ') + ')',
+                )
               }
-              var found
-              for (var i = 0; i < list.length; i += 1) {
-                if (list[i] && list[i].ns === NS) {
-                  found = list[i]
-                  break
-                }
-              }
+              var found = pickEntry(list)
               if (found === undefined) {
                 var seen = list
                   .map(function (entry) {
@@ -450,9 +533,14 @@
                   .filter(Boolean)
                   .join(', ')
                 return unavailableBecause(
-                  'no settings entry is named "' + NS + '" (describe() returned: ' + (seen || 'nothing') + ')',
+                  'no settings entry for this plugin (looked for "' +
+                    NS +
+                    '"; describe() returned: ' +
+                    (seen || 'nothing') +
+                    ')',
                 )
               }
+              resolvedNs = found.ns
               return {
                 status: 'ready',
                 available: true,
@@ -482,12 +570,22 @@
             }
             // The revision is read fresh immediately before the write so a page
             // left open across another edit reports a conflict instead of
-            // silently overwriting it.
+            // silently overwriting it. `read()` also refreshes `resolvedNs`.
             return read().then(function (snap) {
               if (!snap.available) {
                 throw new Error(snap.reason || 'this plugin has no settings entry in the active profile')
               }
-              return remote.mutate(NS, ops, snap.revision)
+              if (resolvedNs === null) {
+                throw new Error('this plugin did not resolve its settings entry id')
+              }
+              // The write answers with a RemoteResult envelope as well; unwrap
+              // it so a refusal surfaces as a real message instead of looking
+              // like a successful save.
+              return remote.mutate(resolvedNs, ops, snap.revision).then(function (answer) {
+                var result = unwrapRemote(answer)
+                if (result.ok === false) throw new Error(result.reason)
+                return result.value
+              })
             })
           },
           /**
@@ -503,7 +601,8 @@
             if (!events || typeof events.$on !== 'function') return function () {}
             try {
               return events.$on('settings/document-updated', function (ns) {
-                if (ns === undefined || ns === NS) listener()
+                // Match the resolved entry id, not the package-relative name.
+                if (ns === undefined || ns === resolvedNs || ns === NS) listener()
               })
             } catch (error) {
               // A missing gateway listener must not take the page down.
@@ -796,6 +895,8 @@
       exports.apply = apply
       exports.inject = inject
       exports.NS = NS
+      exports.pickEntry = pickEntry
+      exports.unwrapRemote = unwrapRemote
       exports.CLASS = CLASS
       exports.CSS = CSS
       exports.ZH = zh

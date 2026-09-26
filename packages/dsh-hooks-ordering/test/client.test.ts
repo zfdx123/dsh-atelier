@@ -23,6 +23,8 @@ interface Registration {
     fromLines: (text: unknown) => string[]
     toLines: (value: unknown) => string
     sameLines: (value: unknown, text: unknown) => boolean
+    pickEntry: (list: { ns: string }[]) => { ns: string } | undefined
+    unwrapRemote: (answer: unknown) => { ok: boolean; value?: unknown; reason?: string }
   }
 }
 
@@ -426,6 +428,48 @@ describe('the client half', () => {
     const mod = registration.factory(() => createReactDouble().react)
     expect(mod.inject).toEqual(['slots', 'remote', 'remote.settings', 'locale'])
     expect(typeof mod.apply).toBe('function')
+  })
+
+  // Regression: the Remote answers with a `RemoteResult` envelope
+  // (`{ok:true, value}`) and the client proxy does NOT unwrap it. Reading
+  // `answer.namespaces` straight off the answer got `undefined`, which the page
+  // reported as "describe() returned no namespaces array" even though the wire
+  // exchange was healthy (ok:true, 20 namespaces, including this plugin's).
+  it('unwraps the RemoteResult envelope instead of reading fields off it', async () => {
+    const mod = (await loadClient()).factory(() => createReactDouble().react)
+
+    const payload = { writable: true, namespaces: [{ ns: 'dsh-plugin-hooks-ordering' }] }
+    // the shape the runtime actually delivers
+    expect(mod.unwrapRemote({ ok: true, value: payload })).toEqual({ ok: true, value: payload })
+    // a refusal must surface as a reason, not as a silent empty form
+    const refused = mod.unwrapRemote({ ok: false, error: { code: 'gateway/internal', message: 'boom' } })
+    expect(refused.ok).toBe(false)
+    expect(String(refused.reason)).toContain('gateway/internal')
+    expect(String(refused.reason)).toContain('boom')
+    // a plain value keeps working if a future runtime unwraps for us
+    expect(mod.unwrapRemote(payload)).toEqual({ ok: true, value: payload })
+  })
+
+
+  // the row that mounted this plugin. The shipped aggregator row is
+  // `dsh-plugin-hooks-ordering` while this package's own patch says
+  // `hooks-ordering`, so matching on a constant left the form empty ("no
+  // settings entry is named …") and every write was refused with
+  // `settings/rejected: No configurable plugin entry "hooks-ordering"`.
+  it('finds its settings entry under whatever id the mounting row used', async () => {
+    const mod = (await loadClient()).factory(() => createReactDouble().react)
+    const ns = mod.NS
+
+    // the package's own row id
+    expect(mod.pickEntry([{ ns }])?.ns).toBe(ns)
+    // the aggregator's row id, which is what production actually has
+    expect(mod.pickEntry([{ ns: 'other' }, { ns: `dsh-plugin-${ns}` }])?.ns).toBe(`dsh-plugin-${ns}`)
+    // a user's own row name
+    expect(mod.pickEntry([{ ns: `my-${ns}` }])?.ns).toBe(`my-${ns}`)
+    // unrelated entries must not be claimed
+    expect(mod.pickEntry([{ ns: 'agent-default-model' }, { ns: 'ui-theme' }])).toBeUndefined()
+    // ambiguity is refused rather than guessed
+    expect(mod.pickEntry([{ ns: `a-${ns}` }, { ns: `b-${ns}` }])).toBeUndefined()
   })
 
   it('never injects the removed `settingsScope` service', async () => {
