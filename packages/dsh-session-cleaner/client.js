@@ -785,6 +785,15 @@ window.__ModuleLoader__.load({
     const TRIGGER_PREFIXES = ['会话“', 'Session actions for ']
     const TRIGGER_WINDOW_MS = 3000
 
+    /**
+     * How the shell names a menu. Every menu it mounts is a `role="menu"` portal
+     * that `body` takes as its own direct child (read off the running app), and
+     * that is what makes the search behind it bounded: a menu holds a handful of
+     * items, so finding the row menu inside one is a few element reads rather
+     * than a walk over whatever the page just rendered.
+     */
+    const MENU_SELECTOR = '[role="menu"]'
+
     /** Innermost elements whose trimmed text is exactly one of `labels`. */
     function leafByText(root, labels) {
       const hits = []
@@ -1080,50 +1089,123 @@ window.__ModuleLoader__.load({
 
     /**
      * Watch for the row menu opening and augment it. The row comes from the ⋮
-     * trigger the user just pressed; the menu is identified by its labels.
+     * trigger the user just pressed; the menu is located by its role and
+     * identified by its labels.
+     *
+     * ## Why the watch is armed by the press instead of always on
+     *
+     * This used to be a permanent `MutationObserver` on `document.body` with
+     * `subtree: true`, handing **every** added node to {@link findSessionMenu} —
+     * which walks the whole added subtree reading `.textContent` per element
+     * (cost quadratic in the subtree) and then climbs six ancestors doing it
+     * again. Rendering a session commits thousands of nodes in a handful of
+     * mutations, so opening a large one froze the page: measured against a 5MB
+     * session log, a single observer callback ran for 14.6 seconds of the 15.3
+     * second main-thread block. A menu, though, can only appear as the result of
+     * the press that opens it, so the watch is armed by that press, reads only
+     * top-level insertions on `body` (where the shell portals its menus), and
+     * lets go the moment the menu it was armed for has been served.
      */
     function installMenuEntry(ctx, dict) {
       let pendingRow = null
       let pendingAt = 0
       let catalog = null
+      let catalogSettled = false
+      let observer = null
+      let expiry = null
 
-      const onPointerDown = (event) => {
+      /** Stop watching: the window closed, or the menu has been served. */
+      const disarm = () => {
+        if (expiry !== null) {
+          clearTimeout(expiry)
+          expiry = null
+        }
+        if (observer !== null) observer.disconnect()
+      }
+
+      /**
+       * The row whose ⋮ trigger this event belongs to, or null when the event
+       * belongs to no row trigger. `pointerdown` carries the press itself;
+       * `click` is what the shell's button produces for a keyboard activation
+       * (Enter/Space) and for a programmatic one, so both arm the watch.
+       */
+      const triggerRow = (event) => {
         const target = event.target
-        if (!(target instanceof Element)) return
+        if (!(target instanceof Element)) return null
         const row = target.closest('[role="treeitem"]')
-        if (row === null) return
+        if (row === null) return null
         const trigger = target.closest('button')
-        if (trigger === null) return
+        if (trigger === null) return null
         const name = trigger.getAttribute('aria-label') ?? ''
         const isRowTrigger =
           TRIGGER_PREFIXES.some((prefix) => name.startsWith(prefix)) ||
           trigger.closest('[class*="rowActions"]') !== null
         if (!isRowTrigger) {
           report('trigger-ignored', { name: name.slice(0, 60) })
-          return
+          return null
         }
+        report('trigger', { name: name.slice(0, 60) })
+        return row
+      }
+
+      const onActivate = (event) => {
+        const row = triggerRow(event)
+        if (row === null) return
         pendingRow = row
         pendingAt = Date.now()
-        report('trigger', { name: name.slice(0, 60) })
+        if (observer === null) {
+          observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+              for (const node of mutation.addedNodes) {
+                if (node.nodeType !== 1) continue
+                attempt(node)
+              }
+            }
+          })
+        }
+        observer.observe(document.body, { childList: true })
+        if (expiry !== null) clearTimeout(expiry)
+        expiry = setTimeout(disarm, TRIGGER_WINDOW_MS)
+        // Node returns a Timeout; a browser returns a number. Only one of them
+        // can hold the process open, and a watch armed by a press must not.
+        expiry?.unref?.()
+        // Nothing is fetched at install: the catalog is the host's whole session
+        // list, and a page whose row menus are never opened has no use for it.
+        // The press is the first moment it can be needed, and starting here
+        // gives the answer time to land before the menu does.
+        if (catalogSettled === false) loadCatalog().catch(() => {})
       }
 
       // 目录请求的序号：只有最新一次的结果允许写进 `catalog`。
       //
-      // 回归：启动时一次拉取（下面 1142 行）与「行内 id 没解出来时」的重试
-      // （1124 行）会同时在飞，先发的旧响应可能后到并覆盖 `catalog`。已经插进去的
-      // 菜单项不会被重建（标签看起来是对的），但 `catalog` 会一直陈旧到刷新页面，
-      // 于是**下一个**打开的菜单会把运行中的会话显示成可删除。
+      // 回归：按下 ⋮ 的那次拉取与「行内 id 没解出来时」的重试会同时在飞，先发的旧响应
+      // 可能后到并覆盖 `catalog`。已经插进去的菜单项不会被重建（标签看起来是对的），但
+      // `catalog` 会一直陈旧到刷新页面，于是**下一个**打开的菜单会把运行中的会话显示成
+      // 可删除。`catalogInFlight` 让同一时刻只有一次请求在飞，序号再兜一次底。
       let catalogSeq = 0
+      let catalogInFlight = null
       const loadCatalog = () => {
+        if (catalogInFlight !== null) return catalogInFlight
         const seq = (catalogSeq += 1)
-        return fetchCatalog().then((resolved) => {
+        const pending = fetchCatalog().then((resolved) => {
           if (catalogSeq === seq) catalog = resolved
+          catalogSettled = true
+          if (catalogInFlight === pending) catalogInFlight = null
+          report('catalog', { ok: resolved !== null, known: resolved === null ? 0 : resolved.byId.size })
           return resolved
         })
+        catalogInFlight = pending
+        return pending
       }
 
       const attempt = (added) => {
-        const found = findSessionMenu(added)
+        // Only a menu is ever read. The shell mounts each one as a
+        // `role="menu"` portal under `body`, so this admits the portal itself
+        // and a wrapper that carries it, and nothing else the page renders.
+        const menu = added.matches(MENU_SELECTOR) === true ? added : added.querySelector(MENU_SELECTOR)
+        if (menu === null) return
+        if (menu.querySelector(`[${ITEM_ATTR}]`) !== null) return
+        const found = findSessionMenu(menu)
         if (found === undefined) return
         report('menu-found', { archive: (found.anchor.textContent ?? '').trim().slice(0, 40) })
         const fresh = pendingRow !== null && pendingRow.isConnected && Date.now() - pendingAt <= TRIGGER_WINDOW_MS
@@ -1132,40 +1214,43 @@ window.__ModuleLoader__.load({
           report('skip', { reason: 'no-row', fresh })
           return
         }
-        if (augmentMenu(found, row, catalog, ctx, dict)) {
-          pendingRow = null
+        // The catalog is the only source of the `running` flag, so the menu that
+        // arrives before it does waits for it: a session must never be offered
+        // for deletion merely because the list has not landed yet.
+        if (catalogSettled === false) {
+          loadCatalog()
+            .then((resolved) => {
+              if (found.menu.isConnected && augmentMenu(found, row, resolved, ctx, dict)) disarm()
+            })
+            .catch(() => {})
           return
         }
+        if (augmentMenu(found, row, catalog, ctx, dict)) {
+          pendingRow = null
+          disarm()
+          return
+        }
+        // The row did not resolve — usually a session created after the catalog
+        // was fetched, whose id React's fiber did not give up. One more read of
+        // the host's list is worth it before giving up on the menu.
         loadCatalog()
           .then((resolved) => {
-            if (found.menu.isConnected) augmentMenu(found, row, resolved, ctx, dict)
+            if (found.menu.isConnected && augmentMenu(found, row, resolved, ctx, dict)) disarm()
           })
           .catch(() => {})
       }
 
-      const observer = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-          for (const node of mutation.addedNodes) {
-            if (node.nodeType !== 1) continue
-            attempt(node)
-          }
-        }
-      })
-      document.addEventListener('pointerdown', onPointerDown, true)
-      observer.observe(document.body, { childList: true, subtree: true })
-      loadCatalog()
-        .then((resolved) => {
-          report('catalog', { ok: resolved !== null, known: resolved === null ? 0 : resolved.byId.size })
-        })
-        .catch(() => {})
+      document.addEventListener('pointerdown', onActivate, true)
+      document.addEventListener('click', onActivate, true)
       report('install', { ok: true })
 
       ctx.effect(
         () => () => {
-          observer.disconnect()
-          document.removeEventListener('pointerdown', onPointerDown, true)
+          disarm()
+          document.removeEventListener('pointerdown', onActivate, true)
+          document.removeEventListener('click', onActivate, true)
         },
-        'session-cleaner: menu observer',
+        'session-cleaner: menu watcher',
       )
     }
 

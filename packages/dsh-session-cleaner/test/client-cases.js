@@ -80,7 +80,7 @@ function primitivesStub(kit, calls) {
  * rendered — which is how a case tells the kit's glyph from the hand-drawn one.
  */
 function createDom(calls) {
-  const matches = (node, selector) => {
+  const matchesSelector = (node, selector) => {
     const parts = /^(\*|[a-z]+)?(?:\[([\w-]+)(?:([*^$]?=)"([^"]*)")?\])?$/.exec(selector)
     if (parts === null) return false
     const [, tag, name, operator, value] = parts
@@ -179,18 +179,23 @@ function createDom(calls) {
     closest(selector) {
       let node = this
       while (node !== null) {
-        if (matches(node, selector)) return node
+        if (matchesSelector(node, selector)) return node
         node = node.parentElement
       }
       return null
     }
 
+    /** The Element API the installer uses to recognize a menu node. */
+    matches(selector) {
+      return matchesSelector(this, selector)
+    }
+
     querySelector(selector) {
-      return this.descendants().find((node) => matches(node, selector)) ?? null
+      return this.descendants().find((node) => matchesSelector(node, selector)) ?? null
     }
 
     querySelectorAll(selector) {
-      return this.descendants().filter((node) => matches(node, selector))
+      return this.descendants().filter((node) => matchesSelector(node, selector))
     }
 
     descendants() {
@@ -299,12 +304,35 @@ async function mount(options = {}) {
   if (options.menu === true) {
     globalThis.Element = class {}
     dom = createDom(calls)
+    // A browser only delivers mutations while an observer is observing, and the
+    // target/options it was armed with are what decide the cost of watching —
+    // so both are recorded here rather than stubbed away.
     globalThis.MutationObserver = class {
       constructor(callback) {
-        observers.push({ fire: (mutations) => callback(mutations, this) })
+        this.callback = callback
+        this.observing = false
+        this.target = null
+        this.options = null
+        this.disconnects = 0
+        observers.push(this)
       }
-      observe() {}
-      disconnect() {}
+
+      observe(target, options) {
+        this.observing = true
+        this.target = target
+        this.options = options
+      }
+
+      disconnect() {
+        this.observing = false
+        this.disconnects += 1
+      }
+
+      /** Deliver mutations the way a browser does: only while observing. */
+      fire(mutations) {
+        if (!this.observing) return
+        this.callback(mutations, this)
+      }
     }
     globalThis.document = dom.document
   } else {
@@ -475,16 +503,27 @@ function glyphOf(box) {
   return box?.props?.children ?? null
 }
 
-/**
- * Open a session row ⋮ menu the way the shell does — a `pointerdown` on the row
- * trigger, then the menu subtree arriving — and return the augmented menu.
- */
-function openMenu(harness, sessionId = A) {
+/** Deliver mutations to every observing observer, the way a browser would. */
+function deliverMutations(harness, mutations) {
+  for (const observer of harness.observers) observer.fire(mutations)
+}
+
+/** One sidebar row with its ⋮ trigger, as the shell renders it. */
+function rowNodes(harness, sessionId = A) {
   const row = harness.dom.node('div')
   row.setAttribute('role', 'treeitem')
   const trigger = harness.dom.node('button')
   trigger.setAttribute('aria-label', '会话“Doomed”的操作')
+  row.append(trigger)
+  // The row component receives the session node; the id is read from its fiber.
+  row['__reactFiber$case'] = { memoizedProps: { node: { id: sessionId } }, return: null }
+  return { row, trigger }
+}
+
+/** The `[role="menu"]` portal the shell mounts under `body` for a row ⋮. */
+function sessionMenuNode(harness) {
   const menu = harness.dom.node('div')
+  menu.setAttribute('role', 'menu')
   const archiveHolder = harness.dom.node('div')
   const archive = harness.dom.node('button')
   archive.textContent = '归档会话'
@@ -494,12 +533,24 @@ function openMenu(harness, sessionId = A) {
   archiveHolder.append(archive)
   forkHolder.append(fork)
   menu.append(archiveHolder, forkHolder)
-  row.append(trigger, menu)
-  // The row component receives the session node; the id is read from its fiber.
-  row['__reactFiber$case'] = { memoizedProps: { node: { id: sessionId } }, return: null }
+  return menu
+}
+
+/**
+ * Open a session row ⋮ menu the way the shell does — a `pointerdown` on the row
+ * trigger, then the menu arriving — and return the augmented menu.
+ *
+ * Async because the first menu of a page waits for the catalog: the item can
+ * only be offered once the host has said which sessions are running.
+ */
+async function openMenu(harness, sessionId = A) {
+  const { row, trigger } = rowNodes(harness, sessionId)
   harness.dom.document.body.append(row)
   harness.dom.fire('pointerdown', { target: trigger })
-  harness.observers[0].fire([{ addedNodes: [menu] }])
+  const menu = sessionMenuNode(harness)
+  harness.dom.document.body.append(menu)
+  deliverMutations(harness, [{ addedNodes: [menu] }])
+  await settle()
   return menu
 }
 
@@ -939,8 +990,11 @@ export const clientCases = [
           { sessionId: C, blank: true, title: 'Blank draft' },
         ],
       })
-      // The installer fetches the catalog without awaiting it.
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      // The catalog is fetched by the press that can open a menu.
+      const { row, trigger } = rowNodes(harness)
+      harness.dom.document.body.append(row)
+      harness.dom.fire('pointerdown', { target: trigger })
+      await settle()
 
       const listed = harness.calls.filter((call) => call.kind === 'session-list')
       assert.equal(listed.length, 1, '/api/session/list is the transport')
@@ -976,7 +1030,10 @@ export const clientCases = [
         menu: true,
         catalogError: { code: 'gateway/arguments-invalid', message: 'args fields do not match the descriptor' },
       })
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      const { row, trigger } = rowNodes(harness)
+      harness.dom.document.body.append(row)
+      harness.dom.fire('pointerdown', { target: trigger })
+      await settle()
 
       // The gateway answers a malformed call with an envelope of its own, not
       // with silence. Reporting that reason is what turns "the catalog is always
@@ -1014,7 +1071,7 @@ export const clientCases = [
         'a folded group still rotates it',
       )
 
-      const item = openMenu(harness).querySelector('[data-session-cleaner-item]')
+      const item = (await openMenu(harness)).querySelector('[data-session-cleaner-item]')
       assert.ok(item !== null, 'the delete item joins the row menu')
       assert.equal(item.tagName, 'button', 'as the same button')
       assert.equal(item.title, '删除会话', 'with the same title')
@@ -1076,7 +1133,7 @@ export const clientCases = [
       fold(harness, 'w1')
       assert.equal(chevronBox(harness.tree(), 'w1').props.style.transform, 'rotate(-90deg)', 'which still rotates')
 
-      const item = openMenu(harness).querySelector('[data-session-cleaner-item]')
+      const item = (await openMenu(harness)).querySelector('[data-session-cleaner-item]')
       assert.ok(item !== null, 'the item still joins the menu')
       assert.equal(item.children[0].mark, 'hand', 'with the hand-drawn trash glyph')
       assert.equal(item.children[0].tagName, 'svg')
@@ -1119,7 +1176,7 @@ export const clientCases = [
       assert.equal(glyphOf(searchBox(harness.tree()))?.type, 'svg', 'the search glyph is hand-drawn')
       assert.equal(glyphOf(chevronBox(harness.tree(), 'w1'))?.type, 'svg', 'so is the fold glyph')
 
-      const item = openMenu(harness).querySelector('[data-session-cleaner-item]')
+      const item = (await openMenu(harness)).querySelector('[data-session-cleaner-item]')
       assert.ok(item !== null, 'the row menu still gains its item')
       assert.equal(item.children[0].mark, 'hand', 'trash glyph included')
       assert.equal(
@@ -1127,6 +1184,192 @@ export const clientCases = [
         false,
         'no kit glyph is asked for',
       )
+    },
+  ],
+
+  // The row-menu watcher used to be a permanent `subtree` observer on
+  // `document.body`, and every added node was searched for the menu by text: a
+  // `querySelectorAll('*')` walk that read `.textContent` per element (quadratic
+  // in the subtree) and climbed six ancestors doing it again. Opening a 5MB
+  // session — thousands of nodes committed in a handful of mutations — froze the
+  // page for 15 seconds. These cases pin the replacement: nothing is watched
+  // while idle, the watch is armed by the press that can open a menu, it reads
+  // only menu portals, and it lets go as soon as the menu has been served.
+
+  [
+    'client: the title catalog is fetched by the first ⋮ press, not at install',
+    async (assert) => {
+      const harness = await mount({ menu: true, catalogItems: [{ sessionId: A, running: false, title: 'Alpha' }] })
+      await settle()
+      assert.deepEqual(
+        harness.calls.filter((call) => call.kind === 'session-list'),
+        [],
+        'a page whose row menus are never opened asks the host for no session list',
+      )
+      assert.equal(
+        harness.calls.some((call) => call.kind === 'diag' && call.event === 'catalog'),
+        false,
+        'and reports nothing about one',
+      )
+
+      const { row, trigger } = rowNodes(harness)
+      harness.dom.document.body.append(row)
+      harness.dom.fire('pointerdown', { target: trigger })
+      await settle()
+
+      assert.equal(
+        harness.calls.filter((call) => call.kind === 'session-list').length,
+        1,
+        'the press starts exactly one fetch, in the window it can be used in',
+      )
+      assert.equal(
+        harness.calls.find((call) => call.kind === 'diag' && call.event === 'catalog')?.detail.ok,
+        true,
+        'whose result is still reported for diagnosis',
+      )
+    },
+  ],
+
+  [
+    'client: the first row menu waits for the catalog before offering a running session for deletion',
+    async (assert) => {
+      const harness = await mount({
+        menu: true,
+        sessions: [{ id: A, displayTitle: 'Doomed', updatedAt: 1000, running: true }],
+        workspaces: [{ workspaceId: 'w1', title: 'Alpha', sessionIds: [A] }],
+        catalogItems: [{ sessionId: A, running: true, title: 'Doomed' }],
+      })
+      const { row, trigger } = rowNodes(harness)
+      harness.dom.document.body.append(row)
+      harness.dom.fire('pointerdown', { target: trigger })
+      const menu = sessionMenuNode(harness)
+      harness.dom.document.body.append(menu)
+      deliverMutations(harness, [{ addedNodes: [menu] }])
+
+      assert.equal(
+        menu.querySelector('[data-session-cleaner-item]'),
+        null,
+        'nothing is offered while the running flag is still unknown',
+      )
+      await settle()
+      const item = menu.querySelector('[data-session-cleaner-item]')
+      assert.ok(item !== null, 'the item lands as soon as the catalog answers')
+      assert.equal(item.disabled, true, 'and a running session is never offered for deletion')
+    },
+  ],
+
+  [
+    'client: nothing watches the DOM until a row ⋮ is pressed',
+    async (assert) => {
+      const harness = await mount({ menu: true })
+      assert.equal(harness.observers.length, 0, 'a page that never opens a row menu installs no observer at all')
+
+      const { row, trigger } = rowNodes(harness)
+      harness.dom.document.body.append(row)
+      harness.dom.fire('pointerdown', { target: trigger })
+
+      assert.equal(harness.observers.length, 1, 'the press arms exactly one observer')
+      const observer = harness.observers[0]
+      assert.equal(observer.observing, true, 'which is observing')
+      assert.equal(observer.target, harness.dom.document.body, 'body, where the shell portals its menus')
+      assert.deepEqual(
+        observer.options,
+        { childList: true },
+        'top-level insertions only — a subtree watch here is what froze the page',
+      )
+    },
+  ],
+
+  [
+    'client: a menu that arrives without a ⋮ press is never scanned',
+    async (assert) => {
+      const harness = await mount({
+        menu: true,
+        sessions: [{ id: A, displayTitle: 'Doomed', updatedAt: 1000, running: false }],
+        workspaces: [{ workspaceId: 'w1', title: 'Alpha', sessionIds: [A] }],
+      })
+      // Mounted inside the row, which is a row the old always-on search could
+      // resolve — so this is not "it failed to find the row", it is "nothing was
+      // looking at all".
+      const { row } = rowNodes(harness)
+      harness.dom.document.body.append(row)
+      const menu = sessionMenuNode(harness)
+      row.append(menu)
+      deliverMutations(harness, [{ addedNodes: [menu] }])
+
+      assert.equal(
+        menu.querySelector('[data-session-cleaner-item]'),
+        null,
+        'the page is left exactly as the shell built it',
+      )
+    },
+  ],
+
+  [
+    'client: a menu opened from the keyboard still gains the item',
+    async (assert) => {
+      const harness = await mount({
+        menu: true,
+        sessions: [{ id: A, displayTitle: 'Doomed', updatedAt: 1000, running: false }],
+        workspaces: [{ workspaceId: 'w1', title: 'Alpha', sessionIds: [A] }],
+      })
+      const { row, trigger } = rowNodes(harness)
+      harness.dom.document.body.append(row)
+      // Enter on the shell's ⋮ button arrives as a click, with no pointerdown.
+      harness.dom.fire('click', { target: trigger })
+
+      const menu = sessionMenuNode(harness)
+      harness.dom.document.body.append(menu)
+      deliverMutations(harness, [{ addedNodes: [menu] }])
+      await settle()
+
+      assert.ok(
+        menu.querySelector('[data-session-cleaner-item]') !== null,
+        'a keyboard-opened menu is served like a pressed one',
+      )
+    },
+  ],
+
+  [
+    'client: an armed watcher reads menu portals only, not arbitrary subtrees',
+    async (assert) => {
+      const harness = await mount({ menu: true })
+      const { row, trigger } = rowNodes(harness)
+      harness.dom.document.body.append(row)
+      harness.dom.fire('pointerdown', { target: trigger })
+
+      // Labels in an added subtree that is not a menu: the old text search
+      // would have injected the item right here.
+      const decoy = harness.dom.node('div')
+      const holder = harness.dom.node('div')
+      const archive = harness.dom.node('button')
+      archive.textContent = '归档会话'
+      const fork = harness.dom.node('button')
+      fork.textContent = '分叉会话'
+      holder.append(archive, fork)
+      decoy.append(holder)
+      harness.dom.document.body.append(decoy)
+      deliverMutations(harness, [{ addedNodes: [decoy] }])
+
+      assert.equal(decoy.querySelector('[data-session-cleaner-item]'), null, 'nothing is injected outside a real menu')
+      assert.equal(harness.observers[0].observing, true, 'and the window stays open for the menu that is coming')
+    },
+  ],
+
+  [
+    'client: the watcher lets go as soon as the row menu has been served',
+    async (assert) => {
+      const harness = await mount({
+        menu: true,
+        sessions: [{ id: A, displayTitle: 'Doomed', updatedAt: 1000, running: false }],
+        workspaces: [{ workspaceId: 'w1', title: 'Alpha', sessionIds: [A] }],
+      })
+
+      const menu = await openMenu(harness)
+      assert.ok(menu.querySelector('[data-session-cleaner-item]') !== null, 'the item joined the menu')
+      const observer = harness.observers[0]
+      assert.equal(observer.observing, false, 'and the page stopped being watched')
+      assert.ok(observer.disconnects >= 1, 'through the observer’s own disconnect')
     },
   ],
 ]
