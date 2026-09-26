@@ -562,6 +562,48 @@ test('connection 可用时必须注册精确 Fetch 路由，而不是裸 webServ
   }
 })
 
+test('claimEntry 按值形状认领自己的条目，不依赖 loader 条目 id', async () => {
+  // 回归：0.1.7 的设置 ns 是 **loader 条目 id**，而那个 id 由挂载本插件的那一行
+  // 决定。同一个包在根下挂是 `dsh-skills-manager`，挂在 `include` 分组下就变成
+  // `include:dsh-skills-manager`（实测宿主 192 个条目里绝大多数都是带前缀的形态）。
+  // 以前把 id 当持久键，换个挂载方式就写到别的 ns 上，宿主直接拒绝：
+  //
+  //   No configurable plugin entry "include:dsh-skills-manager"
+  //
+  // 下面这份列表的值形状取自线上宿主真实返回（21 个条目）。
+  const describeList = [
+    { ns: 'agent-default-model', value: { provider: 'deepseek-official', model: 'f', reasoningEffort: 'max' } },
+    { ns: 'pwsh-sandbox', value: { timeoutMs: 1, maxTimeoutMs: 2, maxOutputBytes: 3 } },
+    { ns: 'ui-theme', value: { preference: 'light', fontSize: 14 } },
+    { ns: 'dsh-mcp-manager', value: { servers: [] } },
+    { ns: 'dsh-plugin-hooks-ordering', value: { hooks: [], serialHooks: [], log: '' } },
+    { ns: 'include:dsh-skills-manager', value: { customSkillDirs: [], deepSkillDirs: [], projects: [] } },
+  ]
+  assert.equal(plugin.claimEntry(describeList)?.ns, 'include:dsh-skills-manager')
+
+  // 根下挂载（无前缀）同样要认出来
+  assert.equal(
+    plugin.claimEntry([{ ns: 'dsh-mcp-manager', value: { servers: [] } }, { ns: 'dsh-skills-manager', value: { customSkillDirs: [] } }])
+      ?.ns,
+    'dsh-skills-manager',
+  )
+
+  // 认不出的输入一律返回 undefined，绝不赌一个名字写上去
+  assert.equal(plugin.claimEntry([]), undefined)
+  assert.equal(plugin.claimEntry(undefined), undefined)
+  assert.equal(plugin.claimEntry([{ ns: 'other', value: { somethingElse: 1 } }]), undefined)
+  // 空对象不能匹配任何 schema
+  assert.equal(plugin.claimEntry([{ ns: 'empty', value: {} }]), undefined)
+  // 同档多个候选 = 歧义 → 拒绝
+  assert.equal(
+    plugin.claimEntry([
+      { ns: 'a', value: { customSkillDirs: [] } },
+      { ns: 'b', value: { deepSkillDirs: [] } },
+    ]),
+    undefined,
+  )
+})
+
 test('apply() 挂上 Config、HTTP 路由、skill_manager 工具与技能提供者', async () => {
   const { sandbox, registered, warnings } = await assemble()
   try {

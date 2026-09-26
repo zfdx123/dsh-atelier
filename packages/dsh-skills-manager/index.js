@@ -70,14 +70,87 @@ export const SETTINGS_NS = 'skill-manager'
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' }
 
 /**
+ * 本插件 Config 声明的字段名，用来按**值形状**认领设置条目。
+ *
+ * schemastery 把子 schema 挂在 `dict` 上，所以直接从 Config 取就是权威清单——
+ * 加字段不会忘了同步这里。
+ */
+const DECLARED_KEYS = new Set(Object.keys(SkillManagerSchema.dict ?? {}))
+
+/**
+ * 「可编辑列表字段」中至少要命中一个，才算认出了自己的条目。
+ * 只靠「键都在我声明的集合里」不够：一个空对象能匹配任何 schema。
+ */
+const EDITABLE_LIST_KEYS = ['customSkillDirs', 'deepSkillDirs', 'projects']
+
+/**
+ * 从 `settings.describe()` 的条目列表里认出**本插件自己的条目**。
+ *
+ * 为什么不能按名字找：0.1.7 的设置 ns 就是 loader 条目 id，而那个 id 由挂载本
+ * 插件的那一行决定。同一个包在根下挂是 `dsh-skills-manager`，挂在 `include`
+ * 分组下就变成 `include:dsh-skills-manager`。把 id 当标识，换个挂载方式就写到
+ * 别的 ns 上，宿主直接回
+ * `No configurable plugin entry "include:dsh-skills-manager"`。
+ *
+ * 改成按形状认领：条目值里的键必须**全部**落在我声明的字段里，且至少带一个
+ * 可编辑列表字段。实测（宿主 21 个条目）只有本插件的条目满足，其余 20 个的键
+ * 都不同。认领成功后用描述符自己的 `ns` 去写，于是无论挂在哪一层都对。
+ *
+ * 两档优先，且**同档多个候选时拒绝**——宁可报「认不出」也不赌一个写上去：
+ *   1. 键集恰好等于声明键（某些宿主会把默认值也投影进来）
+ *   2. 只有列表字段（宿主只投影用户设过的键，这是常见形态）
+ *
+ * 导出给测试直接断言，不必经过装配路径。
+ *
+ * @param {Array<{ns: string, value?: unknown}>} list describe() 返回的条目
+ * @returns {{ns: string, value: object, revision?: unknown} | undefined} 本插件的条目
+ */
+export function claimEntry(list) {
+  if (!Array.isArray(list)) return undefined
+  const candidates = []
+  for (const entry of list) {
+    if (entry === null || entry === undefined) continue
+    const value = entry.value
+    if (value === null || value === undefined || typeof value !== 'object' || Array.isArray(value)) continue
+    const keys = Object.keys(value)
+    if (keys.length === 0) continue
+    let foreign = false
+    for (const key of keys) {
+      if (!DECLARED_KEYS.has(key)) {
+        foreign = true
+        break
+      }
+    }
+    if (foreign) continue
+    if (!EDITABLE_LIST_KEYS.some((key) => keys.includes(key))) continue
+    candidates.push({ entry, exact: keys.length === DECLARED_KEYS.size })
+  }
+  if (candidates.length === 0) return undefined
+  const exact = candidates.filter((c) => c.exact)
+  if (exact.length === 1) return exact[0].entry
+  if (exact.length > 1) return undefined
+  return candidates.length === 1 ? candidates[0].entry : undefined
+}
+
+/**
  * 插件入口。
  * @param {object} ctx Cordis 上下文
  * @param {object} [config] Loader 解析后的本插件 Config（0.1.7 起由 Cordis 传入）
  */
 export function apply(ctx, config) {
-  // 表单定位用的 loader 条目 id：apply 阶段 fiber.entry 可能还没挂上，所以现取。
-  // `config.entryId` 是给非 loader 载体（单测的内存 cordis）留的显式覆盖。
-  const entryIdOf = () => config?.entryId ?? ctx.fiber?.entry?.id ?? SETTINGS_NS
+  /**
+   * 认领到的条目名（= 宿主认的设置 ns）。第一次成功认领后缓存。
+   *
+   * 不预先猜：认领之前谁都不知道自己被挂在哪一层。写入前一定先认领一次。
+   */
+  let claimedNs = null
+
+  /**
+   * `config.entryId` 只在**认领不到**时当兜底（手搭内存 cordis 的测试载体）。
+   *
+   * 它不是生产路径：真实宿主总能认出条目，因为 describe() 里必然有本插件那一行。
+   */
+  const fallbackId = () => (typeof config?.entryId === 'string' && config.entryId !== '' ? config.entryId : SETTINGS_NS)
 
   /**
    * 读一个 volatile 数组字段：Loader 把它包成引用，`.get()` 永远是最新快照。
@@ -238,17 +311,33 @@ export function apply(ctx, config) {
   // 新根扫进来。
 
   /**
+   * 认领本插件的设置条目，并记下宿主认的那个 ns。
+   *
+   * @returns {{ns: string, value: object|undefined, revision: unknown, claimed: boolean}}
+   */
+  const resolveEntry = () => {
+    if (typeof ctx.settings?.describe !== 'function') {
+      return { ns: claimedNs ?? fallbackId(), value: undefined, revision: undefined, claimed: false }
+    }
+    const descriptor = claimEntry(ctx.settings.describe())
+    if (descriptor === undefined) {
+      // 认领不到只可能是非 loader 载体（测试的内存 cordis）或宿主还没登记。
+      // 此时退回显式 id——**这不是生产路径**，真实宿主的 describe() 里必有本条目。
+      return { ns: claimedNs ?? fallbackId(), value: undefined, revision: undefined, claimed: false }
+    }
+    claimedNs = descriptor.ns
+    return { ns: descriptor.ns, value: descriptor.value, revision: descriptor.revision, claimed: true }
+  }
+
+  /**
    * 读本条目当前的 {value, revision}；拿不到时两者都是 undefined。
    *
    * 0.1.7 的 `describe()` 返回**当前可编辑的表单值**（已按 schema 归一化），
    * 正好可以拿来重建整个 section。
    */
   const readSettings = () => {
-    if (typeof ctx.settings?.describe !== 'function') return { value: undefined, revision: undefined }
-    const ns = entryIdOf()
-    const descriptor = ctx.settings.describe().find((entry) => entry !== null && entry !== undefined && entry.ns === ns)
-    if (descriptor === undefined) return { value: undefined, revision: undefined }
-    return { value: descriptor.value, revision: descriptor.revision }
+    const entry = resolveEntry()
+    return { value: entry.value, revision: entry.revision }
   }
 
   /** 设置项的写入是否可用（provider 可能是只读的）。 */
@@ -267,21 +356,24 @@ export function apply(ctx, config) {
    * @throws {Error} 表单只读、未登记或多次冲突
    */
   const writeSettings = async (build) => {
-    const ns = entryIdOf()
     if (!settingsWritable()) {
       throw new Error('设置当前不可写（settings provider 只读），无法保存自定义文件夹')
     }
     let lastError
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const { value, revision } = readSettings(ns)
+      // 每次都重新认领：宿主认的 ns 可能因为重挂载而变（根下 ↔ include 分组下），
+      // 缓存一个名字去写就是原来的 bug。
+      const entry = resolveEntry()
+      const value = entry.value
       const current = value !== null && value !== undefined && typeof value === 'object' ? value : {}
       const next = build({ ...current })
       try {
-        await ctx.settings.replace(ns, next, revision)
+        await ctx.settings.replace(entry.ns, next, entry.revision)
         // 这份 section 装的只有技能根目录（customSkillDirs / deepSkillDirs），改根
         // 就是改技能集合——和写技能文件一样，得让 DSH 重扫。
         notifySkillsChanged()
-        return readSettings(ns).value ?? next
+        const after = resolveEntry()
+        return after.value ?? next
       } catch (error) {
         lastError = error
         // 只有 revision 冲突值得重试；其余（只读、校验失败）直接冒泡。
