@@ -24,6 +24,22 @@ const PLUGIN_VERSION = '1.0.5'
  */
 const AGGREGATOR = 'dsh-atelier'
 const EXCLUDED = new Set(['dsh-opencode-go'])
+/**
+ * A lockfile must resolve from the registry these packages publish to.
+ *
+ * npm records the registry it resolved from as an absolute `resolved` URL, so a
+ * machine-wide npmrc pointing at a mirror leaks mirror URLs into the committed
+ * lockfile. That is not cosmetic: GitHub Actions refuses to fetch them, and
+ * `npm ci` dies with
+ *
+ *   npm error code EALLOWREMOTE
+ *   npm error Refusing to fetch "@standard-schema/spec@https://registry.npmmirror.com/..."
+ *
+ * which fails the verify job before a single test runs. Each package ships an
+ * `.npmrc` pinning the public registry; this check catches a lockfile that was
+ * regenerated while that pin was missing.
+ */
+const MIRROR_URL = /https?:\/\/(?:[a-z0-9-]+\.)*(?:npmmirror\.com|taobao\.org|cnpmjs\.org|mirrors\.[a-z0-9.-]+)\//
 
 const problems = []
 const notes = []
@@ -105,6 +121,20 @@ for (const name of dirs) {
   if (clientExport !== undefined) {
     const rel = typeof clientExport === 'string' ? clientExport : clientExport.default
     if (!fs.existsSync(path.join(dir, rel))) fail(name, `exports["./client"] points at "${rel}" which does not exist`)
+  }
+
+  // The lockfile must resolve from the public registry (see MIRROR_URL).
+  for (const lock of ['package-lock.json', 'pnpm-lock.yaml']) {
+    const lockPath = path.join(dir, lock)
+    if (!fs.existsSync(lockPath)) continue
+    const mirror = MIRROR_URL.exec(fs.readFileSync(lockPath, 'utf8'))
+    if (mirror !== null) {
+      fail(
+        name,
+        `${lock} resolves through a mirror (${mirror[0]}), which npm ci refuses to fetch in CI — ` +
+          'regenerate it with the package\'s .npmrc in place (registry=https://registry.npmjs.org/)',
+      )
+    }
   }
 }
 
