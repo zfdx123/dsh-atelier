@@ -164,8 +164,24 @@ function fakePrimitives(): Record<string, unknown> {
     ;(Primitive as unknown as Record<string, unknown>).primitiveName = name
     return Primitive
   }
+  /**
+   * `Button` in the shell is a `React.forwardRef(...)` OBJECT (`$$typeof` +
+   * `render`), not a plain function. A stand-in that made it a function is what
+   * let the `typeof primitives.Button === 'function'` guard bug stay green here
+   * while it threw the whole kit away in production: `typeof` is `'object'` for a
+   * forwardRef, so the conjunction was permanently false.
+   */
+  const forwardRef = (name: string): Record<string, unknown> => ({
+    $$typeof: Symbol.for('react.forward_ref'),
+    render: (props?: Record<string, unknown>): El => ({
+      type: `ui:${name}`,
+      props: props ?? {},
+      children: (props?.children as unknown[] | undefined) ?? [],
+    }),
+    primitiveName: name,
+  })
   return {
-    Button: make('Button'),
+    Button: forwardRef('Button'),
     Input: make('Input'),
     Switch: make('Switch'),
     Tag: make('Tag'),
@@ -418,6 +434,71 @@ function renderSettingsSection<T>(render: () => T): T {
 }
 
 describe('the client half', () => {
+  it('点「恢复组合默认」发出三个 unset，且不报错', async () => {
+    // 半个回归。「恢复组合默认无效」的根因在 `settle()` 的成功分支：它只把
+    // `dirtyRef.current` 置回 false，而**没有触发重新播种**——`dirtyRef` 是 ref，
+    // 写它不会重渲染，重新播种的 effect 又键在 `[revision, snap]`，reset 把值清回
+    // `{}` 时 revision 不一定要动，于是表单一直显示刚被重置掉的那份值。修法是成功
+    // 时额外 bump 一个 `seedToken` 把它算进 effect 的键。
+    //
+    // 「界面真的变空」那一段由浏览器验证（见提交说明）：这里的 React 替身只有
+    // 位置游标，嵌套组件的 state 槽不可靠，用它断言重渲染后的文本会得到假结论
+    // ——这条测试上一版就是这么被骗的。所以这里只锁定替身能可靠证明的部分：
+    // 三个字段各发一条 unset，且失败横幅不出现。
+    const view: NamespaceView = {
+      ns: 'hooks-ordering',
+      value: { hooks: ['agent/pre-step', 'agent/custom'], serialHooks: ['agent/turn-stopping'], log: '/tmp/x.log' },
+      revision: 1,
+    }
+    const cleared: NamespaceView = { ns: 'hooks-ordering', value: {}, revision: 1 }
+    const calls: { ns: string; ops: unknown }[] = []
+    let onDocumentUpdated: () => void = noop
+    const remote: Record<string, unknown> = {
+      describe: async () => ({ writable: true, hasDocument: true, namespaces: [view] }),
+      mutate: async (ns: string, ops: unknown) => {
+        calls.push({ ns, ops })
+        onDocumentUpdated()
+        return { ok: true, value: cleared }
+      },
+      $on: (event: string, listener: () => void) => {
+        if (event === 'settings/document-updated') onDocumentUpdated = listener
+        return noop
+      },
+    }
+    const ctx: unknown = {
+      effect: (callback: () => () => void) => callback(),
+      remote: { settings: remote },
+      slots: { inject: (_name: string, callback: () => unknown) => callback(), register: () => noop },
+    }
+
+    const double = createReactDouble()
+    const mod = (await loadClient()).factory(() => double.react)
+    const mounted = await double.mountAndFlush(() => mod.SettingsSection({ ctx }) as unknown)
+
+    const resetButton = collectByType(mounted.tree, 'button').filter((b) => textOf(b).includes('恢复'))[0]
+    expect(resetButton).toBeDefined()
+    ;(resetButton.props.onClick as () => void)()
+
+    let tree = mounted.rerender()
+    for (let round = 0; round < 12; round += 1) {
+      await Promise.resolve()
+      tree = mounted.rerender()
+    }
+
+    // 一次 mutate，三个字段各一条 unset（回到 schema 默认），一个 set 都没有
+    expect(calls.length).toBe(1)
+    expect(calls[0].ns).toBe('hooks-ordering')
+    const ops = calls[0].ops as { op: string; path: string[] }[]
+    expect(ops.map((op) => `${op.op}:${op.path.join('.')}`)).toEqual([
+      'unset:hooks',
+      'unset:serialHooks',
+      'unset:log',
+    ])
+
+    // 写入成功就不该出现失败横幅
+    expect(collectText(tree).join(' ')).not.toContain('保存失败')
+  })
+
   it('registers under the package name, which is what the loader asserts', async () => {
     const registration = await loadClient()
     expect(registration.id).toBe('@zfdx123/dsh-hooks-ordering')
@@ -456,20 +537,38 @@ describe('the client half', () => {
   // `hooks-ordering`, so matching on a constant left the form empty ("no
   // settings entry is named …") and every write was refused with
   // `settings/rejected: No configurable plugin entry "hooks-ordering"`.
-  it('finds its settings entry under whatever id the mounting row used', async () => {
+  it('按值形状认领设置条目，不靠名字猜（含 include 前缀形态）', async () => {
     const mod = (await loadClient()).factory(() => createReactDouble().react)
-    const ns = mod.NS
 
-    // the package's own row id
-    expect(mod.pickEntry([{ ns }])?.ns).toBe(ns)
-    // the aggregator's row id, which is what production actually has
-    expect(mod.pickEntry([{ ns: 'other' }, { ns: `dsh-plugin-${ns}` }])?.ns).toBe(`dsh-plugin-${ns}`)
-    // a user's own row name
-    expect(mod.pickEntry([{ ns: `my-${ns}` }])?.ns).toBe(`my-${ns}`)
-    // unrelated entries must not be claimed
-    expect(mod.pickEntry([{ ns: 'agent-default-model' }, { ns: 'ui-theme' }])).toBeUndefined()
-    // ambiguity is refused rather than guessed
-    expect(mod.pickEntry([{ ns: `a-${ns}` }, { ns: `b-${ns}` }])).toBeUndefined()
+    // 线上宿主真实返回的条目形状：本插件的是 {hooks, serialHooks, log}，
+    // 其余条目的键都不同。名字一律不参与判断 —— 设置 ns 是 loader 条目 id，
+    // 由挂载这一行的东西决定，根下挂是 `dsh-plugin-hooks-ordering`，挂在
+    // `include` 分组下就变成 `include:dsh-plugin-hooks-ordering`。
+    const live = [
+      { ns: 'agent-default-model', value: { provider: 'x', model: 'y', reasoningEffort: 'max' } },
+      { ns: 'ui-theme', value: { preference: 'light', fontSize: 14 } },
+      { ns: 'dsh-mcp-manager', value: { servers: [] } },
+      { ns: 'dsh-skills-manager', value: { customSkillDirs: [] } },
+      { ns: 'include:dsh-plugin-hooks-ordering', value: { hooks: [], serialHooks: [], log: '' } },
+    ]
+    expect(mod.pickEntry(live)?.ns).toBe('include:dsh-plugin-hooks-ordering')
+
+    // 根下挂载（无前缀）同样认得出
+    expect(mod.pickEntry([{ ns: 'other', value: { servers: [] } }, { ns: 'x', value: { hooks: [] } }])?.ns).toBe('x')
+
+    // 只投影用户设过的键时也要认得出（log 不在就是 log 没设过）
+    expect(mod.pickEntry([{ ns: 'y', value: { hooks: ['a'], serialHooks: ['b'] } }])?.ns).toBe('y')
+
+    // 认不出的一律 undefined，绝不赌一个名字写上去
+    expect(mod.pickEntry([])).toBeUndefined()
+    expect(mod.pickEntry(undefined)).toBeUndefined()
+    expect(mod.pickEntry([{ ns: 'agent-default-model', value: { provider: 'x' } }])).toBeUndefined()
+    // 空对象不能匹配任何 schema
+    expect(mod.pickEntry([{ ns: 'empty', value: {} }])).toBeUndefined()
+    // 非对象值
+    expect(mod.pickEntry([{ ns: 'z', value: 'hooks' }])).toBeUndefined()
+    // 同档歧义 → 拒绝
+    expect(mod.pickEntry([{ ns: 'a', value: { hooks: [] } }, { ns: 'b', value: { serialHooks: [] } }])).toBeUndefined()
   })
 
   it('never injects the removed `settingsScope` service', async () => {

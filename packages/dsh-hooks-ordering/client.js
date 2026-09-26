@@ -181,15 +181,34 @@
       var primitivesError = ''
       var UI = loadPrimitives()
 
+      /**
+       * Whether a value can be rendered as a React component.
+       *
+       * `typeof x === 'function'` is NOT enough: the shell's `Button` is built with
+       * `React.forwardRef(...)`, so its `typeof` is always `'object'` (`$$typeof =
+       * Symbol(react.forward_ref)`, `render` holds the function). A guard that asks
+       * for `typeof primitives.Button === 'function'` is therefore permanently
+       * false, which throws away the whole kit even though Input/Tag/StateDot
+       * really are plain functions — so the failure looks like "only the buttons
+       * are off" and the page silently ships its own fallback elements.
+       *
+       * Every other plugin in this repo guards the same way; this one was missed.
+       */
+      function isRenderable(value) {
+        if (typeof value === 'function') return true
+        if (typeof value !== 'object' || value === null) return false
+        return value.$$typeof === Symbol.for('react.forward_ref') || value.$$typeof === Symbol.for('react.memo')
+      }
+
       function loadPrimitives() {
         try {
           var primitives = require(PRIMITIVES)
           if (
             primitives &&
-            typeof primitives.Button === 'function' &&
-            typeof primitives.Input === 'function' &&
-            typeof primitives.Tag === 'function' &&
-            typeof primitives.StateDot === 'function'
+            isRenderable(primitives.Button) &&
+            isRenderable(primitives.Input) &&
+            isRenderable(primitives.Tag) &&
+            isRenderable(primitives.StateDot)
           ) {
             return primitives
           }
@@ -395,22 +414,54 @@
       }
 
       /**
+       * The fields this plugin's settings entry carries. The entry is claimed by
+       * VALUE SHAPE against this set, never by guessing at a name.
+       *
+       * Exactly the fields `hooksOrderingConfig` declares. A host projects only the
+       * entries that have a volatile node, and `entryId` is not volatile, so it can
+       * never appear in a descriptor value — do not add it back.
+       */
+      var OWN_FIELDS = ['hooks', 'serialHooks', 'log']
+
+      /** The fields a real entry must carry at least one of, or it is not ours. */
+      var OWN_REQUIRED_FIELDS = ['hooks', 'serialHooks', 'log']
+
+      /**
        * @param list - descriptor list from `describe()`.
        * @returns the descriptor for this plugin, or undefined.
+       *
+       * Matching on the namespace name is what produced the production failure:
+       * the settings ns is the LOADER ENTRY ID, which belongs to whoever wrote
+       * the row that mounted this plugin. The same package mounted at the top
+       * level has `dsh-plugin-hooks-ordering`, mounted under an `include` group
+       * it becomes `include:dsh-plugin-hooks-ordering` — and a hardcoded name or
+       * a suffix guess then reads one entry and writes another, which the host
+       * refuses outright:
+       *
+       *   No configurable plugin entry "include:dsh-mcp-manager"
+       *
+       * Claiming by value shape removes the guesswork: every key of the entry's
+       * value must be a field this plugin declares, and it must carry at least
+       * one of the real fields (an empty object would match any schema). Two
+       * candidates means ambiguity, and ambiguity returns undefined rather than
+       * betting on one.
        */
       function pickEntry(list) {
-        // Fast path: the row used this package's own documented id.
-        var direct = list.find(function (entry) {
-          return entry && entry.ns === NS
+        if (!Array.isArray(list)) return undefined
+        var candidates = list.filter(function (entry) {
+          if (!entry || typeof entry !== 'object') return false
+          var value = entry.value
+          if (value === null || value === undefined || typeof value !== 'object' || Array.isArray(value)) return false
+          var keys = Object.keys(value)
+          if (keys.length === 0) return false
+          for (var i = 0; i < keys.length; i += 1) {
+            if (OWN_FIELDS.indexOf(keys[i]) < 0) return false
+          }
+          return OWN_REQUIRED_FIELDS.some(function (field) {
+            return keys.indexOf(field) >= 0
+          })
         })
-        if (direct !== undefined) return direct
-        // Otherwise take the entry that was mounting this plugin created.
-        // `dsh-plugin-hooks-ordering` is the shipped aggregator row; the suffix
-        // test also covers a user's own row name.
-        var suffixed = list.filter(function (entry) {
-          return entry && typeof entry.ns === 'string' && entry.ns.slice(-NS.length) === NS
-        })
-        return suffixed.length === 1 ? suffixed[0] : undefined
+        return candidates.length === 1 ? candidates[0] : undefined
       }
 
       // ── the settings page ──────────────────────────────────────────────────
@@ -533,9 +584,9 @@
                   .filter(Boolean)
                   .join(', ')
                 return unavailableBecause(
-                  'no settings entry for this plugin (looked for "' +
-                    NS +
-                    '"; describe() returned: ' +
+                  'no settings entry matches this plugin\'s fields (' +
+                    OWN_REQUIRED_FIELDS.join('/') +
+                    '; describe() returned: ' +
                     (seen || 'nothing') +
                     ')',
                 )
@@ -601,8 +652,15 @@
             if (!events || typeof events.$on !== 'function') return function () {}
             try {
               return events.$on('settings/document-updated', function (ns) {
-                // Match the resolved entry id, not the package-relative name.
-                if (ns === undefined || ns === resolvedNs || ns === NS) listener()
+                // Match the CLAIMED entry id — never a constant.
+                //
+                // Writing a refresh() call is harmless, but this comparison is the
+                // shape someone copies into a write guard, and a constant there
+                // would silently address the wrong entry: the settings ns is the
+                // loader entry id, which changes with how the row is mounted. Until
+                // the first claim, `resolvedNs` is null and a refresh is accepted
+                // unconditionally — a re-describe is cheap and always safe.
+                if (ns === undefined || resolvedNs === null || ns === resolvedNs) listener()
               })
             } catch (error) {
               // A missing gateway listener must not take the page down.
@@ -633,6 +691,12 @@
         var setDraft = draftState[1]
 
         var dirtyRef = useRef(false)
+        // Bumped after every accepted mutation so the re-seed effect runs again
+        // even when neither the revision nor the snapshot identity changed (a
+        // reset back to the composition default is exactly that case).
+        var seedTokenState = useState(0)
+        var seedToken = seedTokenState[0]
+        var setSeedToken = seedTokenState[1]
         var busyState = useState(false)
         var busy = busyState[0]
         var setBusy = busyState[1]
@@ -667,6 +731,8 @@
 
         // Re-seed the editor from every accepted snapshot, but never over an
         // unsaved edit: the user's typing outranks a background refresh.
+        // `seedToken` is in the key so an accepted mutation always re-seeds once,
+        // even if the revision did not move (see settle()).
         var revision = snap ? snap.revision : undefined
         useEffect(
           function () {
@@ -674,7 +740,7 @@
             var value = snap.value || {}
             setDraft({ hooks: toLines(value.hooks), serialHooks: toLines(value.serialHooks), log: value.log || '' })
           },
-          [revision, snap],
+          [revision, snap, seedToken],
         )
 
         /** @param fieldName - settings field to edit; @param next - its new textarea content. */
@@ -692,7 +758,20 @@
           setError('')
           pending.then(
             function () {
+              // Two things have to happen on success, and the FIRST one alone is
+              // not enough:
+              //  1. the unsaved-edit flag drops, so a re-seed is allowed again;
+              //  2. a re-seed is actually TRIGGERED.
+              // `dirtyRef` is a ref: writing it does not re-render, and the
+              // re-seed effect keys on `[revision, snap]`. After a reset the
+              // revision stays 0 and the value goes back to `{}`, so the effect
+              // had no reason to run again: the form kept showing the value the
+              // user just reset, which read as "恢复组合默认无效" even though the
+              // write had succeeded. Bumping a counter makes it run once more.
               dirtyRef.current = false
+              setSeedToken(function (token) {
+                return token + 1
+              })
               setBusy(false)
             },
             function (failure) {

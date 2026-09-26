@@ -38,10 +38,17 @@ export interface HooksOrderingSettings {
 }
 
 /**
- * Entry id used by `cordis.patch.yml` and, in 0.1.7, by the settings form.
+ * The id this package's own `cordis.patch.yml` uses, and the client half's
+ * settings-section id. **Test-only for the server half** — do not read it as "the
+ * settings namespace".
  *
- * The form is keyed by the **loader entry id**; this constant is the shipped
- * row's id, and it is also the client half's settings-section id.
+ * In 0.1.7 a settings entry is named by the **loader entry id** of the row that
+ * mounted the plugin, which is not something the plugin knows: the aggregator
+ * mounts this package as `dsh-plugin-hooks-ordering`, this package's own patch as
+ * `hooks-ordering`, and a row inside an `include` group gets a group prefix
+ * (`include:...`). The server half therefore reads its config through the Config
+ * it was handed, and the client half claims its entry by **value shape** (see
+ * `pickEntry` in client.js) rather than by comparing names.
  */
 export const SETTINGS_NS = 'hooks-ordering'
 

@@ -1461,6 +1461,14 @@ window.__ModuleLoader__.load({
       }
       var notify = props.notify || noop
 
+      // 只要**内容**变了就重新播种，而不是只看路径。
+      //
+      // 回归：这里原来键在 `[skill.path]` 上。同一个技能被重新读一遍时 path 不变，
+      // 于是 effect 不跑——「放弃改动」（onReload → onRead → patch 一份新对象，
+      // 同一个 path）点了没反应：宿主真的重读了，编辑框里还是改过的文本，保存按钮
+      // 依然可点。而这条 effect 是**唯一**的重新播种路径（上面的 useState 只在挂载
+      // 时执行一次，DetailPanel 又坐在三元表达式里位置固定，切换技能不会重挂它），
+      // 所以同 path 的任何重读都是空操作。
       useEffect(
         function () {
           setForm({
@@ -1470,7 +1478,7 @@ window.__ModuleLoader__.load({
             error: '',
           })
         },
-        [skill.path],
+        [skill.path, skill.description, skill.whenToUse, skill.body],
       )
 
       var save = function () {

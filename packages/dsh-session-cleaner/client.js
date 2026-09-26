@@ -1107,6 +1107,21 @@ window.__ModuleLoader__.load({
         report('trigger', { name: name.slice(0, 60) })
       }
 
+      // 目录请求的序号：只有最新一次的结果允许写进 `catalog`。
+      //
+      // 回归：启动时一次拉取（下面 1142 行）与「行内 id 没解出来时」的重试
+      // （1124 行）会同时在飞，先发的旧响应可能后到并覆盖 `catalog`。已经插进去的
+      // 菜单项不会被重建（标签看起来是对的），但 `catalog` 会一直陈旧到刷新页面，
+      // 于是**下一个**打开的菜单会把运行中的会话显示成可删除。
+      let catalogSeq = 0
+      const loadCatalog = () => {
+        const seq = (catalogSeq += 1)
+        return fetchCatalog().then((resolved) => {
+          if (catalogSeq === seq) catalog = resolved
+          return resolved
+        })
+      }
+
       const attempt = (added) => {
         const found = findSessionMenu(added)
         if (found === undefined) return
@@ -1121,10 +1136,9 @@ window.__ModuleLoader__.load({
           pendingRow = null
           return
         }
-        fetchCatalog()
+        loadCatalog()
           .then((resolved) => {
-            catalog = resolved
-            if (found.menu.isConnected) augmentMenu(found, row, catalog, ctx, dict)
+            if (found.menu.isConnected) augmentMenu(found, row, resolved, ctx, dict)
           })
           .catch(() => {})
       }
@@ -1139,9 +1153,8 @@ window.__ModuleLoader__.load({
       })
       document.addEventListener('pointerdown', onPointerDown, true)
       observer.observe(document.body, { childList: true, subtree: true })
-      fetchCatalog()
+      loadCatalog()
         .then((resolved) => {
-          catalog = resolved
           report('catalog', { ok: resolved !== null, known: resolved === null ? 0 : resolved.byId.size })
         })
         .catch(() => {})

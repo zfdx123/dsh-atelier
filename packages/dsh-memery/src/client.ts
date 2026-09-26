@@ -914,7 +914,20 @@ function MemorySettingsSection(props: Record<string, unknown>): React.ReactEleme
     loadWorkspaces()
   }, [loadWorkspaces])
 
+  /**
+   * 请求序号：只有「最新一次」请求的响应才允许写状态。
+   *
+   * 回归：`load()` 的依赖里有 `query`，而搜索框是受控输入，所以**每敲一个字符**
+   * 都会发一次请求；`view`/`level`/`status` 变化与刷新按钮同理。没有序号时，
+   * 先发的旧响应可能后到并覆盖新响应——框里写着 `abc`，列表却是 `ab` 的结果，
+   * 计数「N 条」也跟着错。`busy` 同样没保护：**第一个**到达的响应就把 busy 置回
+   * false，此时还有请求在飞，空态「还没有记忆」会盖在本该出现的列表上。
+   */
+  const loadSeq = React.useRef(0)
+
   const load = React.useCallback(() => {
+    const seq = (loadSeq.current += 1)
+    const isCurrent = () => loadSeq.current === seq
     setBusy(true)
     setError(null)
     const params = new URLSearchParams()
@@ -926,11 +939,16 @@ function MemorySettingsSection(props: Record<string, unknown>): React.ReactEleme
     fetch(`/dsh-memery/memories?${params.toString()}`, { cache: 'no-store' })
       .then((r) => r.json())
       .then((json: { ok?: boolean; error?: string; memories?: MemoryItem[] }) => {
+        if (!isCurrent()) return
         if (json.ok !== true) throw new Error(json.error ?? t('errLoad'))
         setData({ memories: json.memories ?? [] })
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusy(false))
+      .catch((e) => {
+        if (isCurrent()) setError(e instanceof Error ? e.message : String(e))
+      })
+      .finally(() => {
+        if (isCurrent()) setBusy(false)
+      })
   }, [view, isGlobalView, query, level, status])
 
   React.useEffect(() => {

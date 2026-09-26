@@ -74,12 +74,18 @@ export const ServerSchema = Schema.object({
 export const ServersSchema = Schema.object({
   servers: Schema.array(ServerSchema).default([]).volatile(),
   /**
-   * 覆盖「本条目在 profile 里的 loader 条目 id」。
+   * 兼容字段：**不再**决定设置条目的名字。
    *
-   * 只给非 loader 载体用（单测里手搭的内存 cordis 没有 loader 条目）。
-   * 正常组合留空：插件从 `ctx.fiber.entry.id` 现取，始终与 profile 里那一行一致。
+   * 0.1.7 的设置 ns 是 loader 条目 id，而那个 id 由**挂载本插件的那一行**决定，
+   * 不是插件能知道的东西：同一个包在根下挂是 `dsh-mcp-manager`，挂在 `include`
+   * 分组下就变成 `include:dsh-mcp-manager`（实测宿主 192 个条目里绝大多数都是
+   * 这种带前缀的形态）。把它当持久键会让保存写到别的 ns 上，宿主回
+   * `No configurable plugin entry "include:dsh-mcp-manager"`。
+   *
+   * 现在改为按**值形状**认领条目（见 lib/claim.js 的 claimEntry），这个字段只
+   * 留给手搭内存 cordis 的测试载体当兜底。
    */
-  entryId: Schema.string().description('覆盖 loader 条目 id（仅非 loader 载体需要）'),
+  entryId: Schema.string().description('兼容字段；设置条目的名字改为按值形状自动认领'),
 })
 
 // 把设置页的一台服务器配置翻译成 mcp-client 实例配置。只输出契约内的键；

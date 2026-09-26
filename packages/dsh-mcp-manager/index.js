@@ -53,6 +53,7 @@ import {
   substituteSecretRefs,
 } from './lib/logic.js'
 import { API_PATH, createApiHandler, isLoopbackRequest, readNodeBody } from './lib/api.js'
+import { claimEntry, declaredKeys } from './lib/claim.js'
 import { createTlsBridge, describeErrorChain } from './lib/tls.js'
 import { normalizeStdioServer, preflightStdioServer } from './lib/stdio.js'
 
@@ -107,15 +108,40 @@ const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' }
 
 export function apply(ctx, config) {
   // DSH 0.1.7：表单按 loader 条目 id 定位（不再按插件自取的命名空间）。
-  // 条目 id 就是 profile patch 里那一行的 id，例如 `mcp-manager`。
+  // ── 设置条目认领 ─────────────────────────────────────────────────────────
   //
-  // 不能在 apply 时取值：Cordis 在插件启动期间才把 loader 条目挂上。
-  // 装载器给插件 fiber 挂的是 `ctx.fiber.entry`（`Entry.key` 那个 symbol）；
-  // 每次需要时现取，profile 里即与那一行的 id 对齐。
+  // 设置 ns 是 loader 条目 id，但那个 id **不是插件能知道的东西**：它由挂载本插件
+  // 的那一行决定，而且运行时的 id 与组合树里写的 id 不一定相同。实测本机
+  // `dsh --profile web --dump-config` 里是 `id: dsh-mcp-manager`，运行时
+  // `ctx.fiber.entry.id` 却是 `include:dsh-mcp-manager`（`include` 分组会给子条目
+  // 加前缀；宿主 192 个条目里绝大多数都是这种形态）。拿它当键的后果是宿主拒绝：
   //
-  // `config.entryId` 是给非 loader 载体（单测的内存 cordis）留的显式覆盖，
-  // 正常组合不设，所以真实运行时永远走 `ctx.fiber.entry.id`。
-  const entryIdOf = () => config?.entryId ?? ctx.fiber?.entry?.id
+  //   No configurable plugin entry "include:dsh-mcp-manager"
+  //
+  // 所以改成按值形状认领（lib/claim.js），拿描述符自己的 `ns` 用。
+  const DECLARED_KEYS = declaredKeys(ServersSchema)
+
+  /**
+   * 认领本插件的设置条目。
+   *
+   * @returns {{ns: string, value: object|undefined, revision: unknown, claimed: boolean}}
+   */
+  const resolveEntry = () => {
+    if (typeof ctx.settings?.describe === 'function') {
+      const descriptor = claimEntry(ctx.settings.describe(), DECLARED_KEYS)
+      if (descriptor !== undefined) {
+        claimedNs = descriptor.ns
+        return { ns: descriptor.ns, value: descriptor.value, revision: descriptor.revision, claimed: true }
+      }
+    }
+    // 认领不到只可能是非 loader 载体（测试的内存 cordis）或宿主还没登记条目。
+    // `config.entryId` 只在这条兜底路径上有意义——**它不是生产路径**。
+    const fallback = typeof config?.entryId === 'string' && config.entryId !== '' ? config.entryId : undefined
+    return { ns: claimedNs ?? fallback, value: undefined, revision: undefined, claimed: false }
+  }
+
+  /** 认领到的条目名；写入前重新认领，因为它会随重挂载变化。 */
+  let claimedNs = null
 
   /**
    * 读当前服务器列表。`config.servers` 是 Loader 的 volatile 引用：配置一改
@@ -160,16 +186,15 @@ export function apply(ctx, config) {
   // 是位置参数，不受字段改名影响。
   let pushedRev = null
   ctx.on('settings/document-updated', (ns, revision) => {
-    if (ns === entryIdOf() && Number.isInteger(revision)) pushedRev = revision
+    // 认领到的名字可能还没拿到（事件可能早于首次认领），此时先记着，认领后
+    // currentRev() 会以 describe() 为准。
+    if ((claimedNs === null || ns === claimedNs) && Number.isInteger(revision)) pushedRev = revision
   })
   const currentRev = () => {
-    const ns = entryIdOf()
-    if (ns !== undefined && typeof ctx.settings.describe === 'function') {
-      const descriptor = ctx.settings.describe().find((entry) => entry !== null && entry !== undefined && entry.ns === ns)
-      if (descriptor !== undefined && Number.isInteger(descriptor.revision)) {
-        pushedRev = descriptor.revision
-        return descriptor.revision
-      }
+    const entry = resolveEntry()
+    if (entry.claimed && Number.isInteger(entry.revision)) {
+      pushedRev = entry.revision
+      return entry.revision
     }
     return pushedRev === null ? 0 : pushedRev
   }
@@ -490,7 +515,8 @@ export function apply(ctx, config) {
   const onConfigChanged = () => scheduleSync(readServers())
   ctx.on('loader/volatile-update', onConfigChanged)
   ctx.on('settings/updated', (ns, next) => {
-    if (ns !== entryIdOf() && ns !== 'mcp') return
+    // 认领前不知道自己的名字，所以未认领时一律接受（`mcp` 是历史别名）。
+    if (claimedNs !== null && ns !== claimedNs && ns !== 'mcp') return
     scheduleSync(Array.isArray(next?.servers) ? next.servers : readServers())
   })
 
@@ -511,14 +537,15 @@ export function apply(ctx, config) {
         if (invalid !== null) throw new Error(invalid)
         // 服务方法要在**调用时**取：装配期 ctx.settings 可能还没把方法暴露出来。
         const replace = ctx.settings?.replace
-        const ns = entryIdOf()
-        if (process.env.DBG_SETTINGS) console.log('DBG ns=', JSON.stringify(ns), 'replace=', typeof replace)
-        if (ns === undefined || typeof replace !== 'function') {
+        // 名字也要在**调用时**重新认领：它是 loader 条目 id，会随重挂载变化
+        // （根下 ↔ include 分组下），缓存一个名字去写就是原来那个被宿主拒绝的 bug。
+        const entry = resolveEntry()
+        if (entry.ns === null || entry.ns === undefined || typeof replace !== 'function') {
           throw new Error(
             '当前宿主没有可写入的配置表单（settings.replace 不可用）：请在 profile 条目的 config 里直接编辑本插件的 servers。',
           )
         }
-        await replace.call(ctx.settings, ns, { servers }, rev)
+        await replace.call(ctx.settings, entry.ns, { servers }, rev)
       },
     }),
   )

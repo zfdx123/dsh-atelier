@@ -9,8 +9,10 @@
 // （dsh-client-modules：`loaded without registering "<id>" via
 // __ModuleLoader__.load`）。写成短名会在挂载阶段直接抛错，设置页不会出现。
 //
-// 全部用户可见文案走本文件自带的 zh/en 字典（命名空间 'mcp'，与设置命名空间
-// 同名），设置页导航标签是一个 thunk，因此跟随外壳语言；ctx.locale 缺席时
+// 全部用户可见文案走本文件自带的 zh/en 字典。字典命名空间 `mcp` 是**客户端自选
+// 的名字，与设置命名空间无关**——设置 ns 是 loader 条目 id（`dsh-mcp-manager`
+// 或 `include:dsh-mcp-manager`），由挂载这一行的东西决定，本文件不碰它。
+// 设置页导航标签是一个 thunk，因此跟随外壳语言；ctx.locale 缺席时
 // 退回中文，插件照常注册。
 window.__ModuleLoader__.load({
   id: '@zfdx123/dsh-mcp-manager',
@@ -30,9 +32,11 @@ window.__ModuleLoader__.load({
     // label 是「registrant-localized display text」）。所以 label 是一个走
     // 翻译函数的 thunk，字典注册挂在 ctx.effect 上（fiber 卸载即摘除）。
     //
-    // 命名空间 'mcp' 与本插件的设置命名空间同名。ctx.locale 缺席时（宿主组合
-    // 里没有 locale 插件，或测试里的桩 ctx）翻译函数退回本插件自带的中文文案，
-    // 页面照常注册、照常渲染，绝不抛错。
+    // 字典命名空间 `mcp` 是客户端自选的名字。**它不是设置命名空间**：设置 ns 是
+    // loader 条目 id，由挂载这一行的东西决定，客户端从不按名字去猜它（那正是
+    // 「No configurable plugin entry "include:dsh-mcp-manager"」的成因）。
+    // ctx.locale 缺席时（宿主组合里没有 locale 插件，或测试里的桩 ctx）翻译函数
+    // 退回本插件自带的中文文案，页面照常注册、照常渲染，绝不抛错。
     var NS = 'mcp'
     var zh = {
       nav: 'MCP 服务器',
