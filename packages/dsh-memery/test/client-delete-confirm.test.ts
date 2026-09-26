@@ -59,7 +59,7 @@ function kitStub() {
   return {
     RiskConfirmation: marker('RiskConfirmation'),
     Button: marker('Button'),
-    IconWarningOutline: marker('IconWarningOutline'),
+    IconWarningOutlineRegular: marker('IconWarningOutlineRegular'),
   }
 }
 

@@ -62,7 +62,7 @@ window.__ModuleLoader__.load({
       registryOff: '技能登记已关闭：这 {n} 个技能只在面板可见，DSH 不会加载、模型也用不到。',
       registryPending: '磁盘上有、但还没进入 DSH 目录（提供者刷新延迟）：{names}',
       newSkill: '＋ 新建技能',
-      // 同上，但无字形：拿得到外壳 IconPlusOutline 时用这条（图标自己就是那个「＋」）。
+      // 同上，但无字形：拿得到外壳 IconPlusOutlineRegular 时用这条（图标自己就是那个「＋」）。
       newSkillPlain: '新建技能',
       refresh: '刷新',
       refreshing: '刷新中…',
@@ -192,7 +192,7 @@ window.__ModuleLoader__.load({
         'Skill registration is off — unmanaged skills: {n}. They show in this panel only; DSH does not load them and the model cannot use them.',
       registryPending: 'On disk but not yet in the DSH catalog (provider refresh lag): {names}',
       newSkill: '＋ New skill',
-      // Icon-less twin of `newSkill`: used once the shell's IconPlusOutline leads the button.
+      // Icon-less twin of `newSkill`: used once the shell's IconPlusOutlineRegular leads the button.
       newSkillPlain: 'New skill',
       refresh: 'Refresh',
       refreshing: 'Refreshing…',
@@ -353,12 +353,39 @@ window.__ModuleLoader__.load({
     //
     // 拿不到时必须降级而不是白屏：模块表里没有这个包时 require 会抛，而抛在 factory
     // 里等于整个插件装不上。所以这里吞掉异常，退回自带样式 + 浏览器弹窗。
-    var UI = loadPrimitives()
+    //
+    // **延迟求值**：把解析推迟到首次读取，factory 阶段绝不会因为模块表状态而失败。
+    // 注意：这**不是**当初「图标退化」的原因——实测模块初始化时 require 已经返回
+    // 完整原语（279 个成员），真正的元凶是 loadPrimitives 里那个恒假的 typeof 守门
+    // （见 isRenderable 的注释）。这里保留延迟求值只是因为它顺带把失败面收窄了。
+    var uiCache
+    function loadUi() {
+      if (uiCache === undefined) uiCache = loadPrimitives()
+      return uiCache
+    }
+    // 对外仍是 `exports.UI`（值是模块对象），读的时候才解析。
+    Object.defineProperty(exports, 'UI', { get: loadUi, configurable: true })
+    var UI = loadUi
+
+    /**
+     * 这个值能不能当 React 组件渲染。
+     *
+     * `typeof x === 'function'` **不够**：外壳的 `Button` 是 `React.forwardRef(...)`
+     * 的产物，`typeof` 恒为 `'object'`（实测 `$$typeof = Symbol(react.forward_ref)`、
+     * `render` 是函数）。以前守门写成 `typeof primitives.Button === 'function'`，
+     * 于是恒假、整套原语被判不可用，走 Button 的图标位与主按钮全部退回字形，
+     * 而 Modal/Input 这些确实是函数，所以故障看起来「只有图标不对」。
+     */
+    function isRenderable(value) {
+      if (typeof value === 'function') return true
+      if (typeof value !== 'object' || value === null) return false
+      return value.$$typeof === Symbol.for('react.forward_ref') || value.$$typeof === Symbol.for('react.memo')
+    }
 
     function loadPrimitives() {
       try {
         var primitives = require('@deepseek-ai/dsh-client-ui-primitives')
-        if (primitives && typeof primitives.Modal === 'function' && typeof primitives.Button === 'function') {
+        if (primitives && isRenderable(primitives.Modal) && isRenderable(primitives.Button)) {
           return primitives
         }
         return null
@@ -603,21 +630,22 @@ window.__ModuleLoader__.load({
      * 外壳图标元素（尺寸默认 16）。
      *
      * 图标是原语包的一部分，跟 Button/Modal 同源：能拿到就用它，字形（'＋'、'✓'…）
-     * 只留给降级路径。逐图标判类型而不是判 `UI !== null`：外壳版本旧到没有这个图标
+     * 只留给降级路径。逐图标判类型而不是判 `UI() !== null`：外壳版本旧到没有这个图标
      * 时同样返回 null，调用方照旧退回字形，不会因为多一个 undefined 组件而白屏。
      */
     function icon(name, size) {
-      if (UI === null || typeof UI[name] !== 'function') return null
-      return e(UI[name], { size: size || 16 })
+      var kit = UI()
+      if (kit === null || typeof kit[name] !== 'function') return null
+      return e(kit[name], { size: size || 16 })
     }
 
     /** 按钮元素。danger = 外壳的危险操作写法（outline + 红字）；icon = 前置 16px 图标。 */
     function button(props, children) {
       var variant = props.variant || 'outline'
       var size = props.size || 'sm'
-      if (UI !== null) {
+      if (UI() !== null) {
         return e(
-          UI.Button,
+          UI().Button,
           {
             key: props.key,
             variant: variant,
@@ -657,10 +685,10 @@ window.__ModuleLoader__.load({
      * 弹窗里的根目录候选行。
      *
      * 选中态原来靠文案前缀「✓ 」表示，现在改走 Button 的 icon 通道（外壳
-     * IconCheckOutline）；拿不到图标时文案照旧带字形，行的行为与外观不变。
+     * IconCheckOutlineRegular）；拿不到图标时文案照旧带字形，行的行为与外观不变。
      */
     function rootChoice(root, selected, onPick) {
-      var check = selected ? icon('IconCheckOutline', 16) : null
+      var check = selected ? icon('IconCheckOutlineRegular', 16) : null
       return button(
         {
           key: root.path,
@@ -682,8 +710,8 @@ window.__ModuleLoader__.load({
      * 输入框与原生 Input（原生 Input 的 <input> 自带 class，颜色由外壳自己管）。
      */
     function textInput(props) {
-      if (UI !== null) {
-        return e(UI.Input, {
+      if (UI() !== null) {
+        return e(UI().Input, {
           className: props.grow ? 'dsh-sm-field-grow' : 'dsh-sm-field',
           value: props.value,
           placeholder: props.placeholder,
@@ -708,8 +736,8 @@ window.__ModuleLoader__.load({
 
     /** 开关元素：原生 Switch 回调直接给下一个布尔值，自带的 checkbox 需要转一下。 */
     function toggle(props) {
-      if (UI !== null) {
-        return e(UI.Switch, {
+      if (UI() !== null) {
+        return e(UI().Switch, {
           checked: props.checked === true,
           onChange: props.onChange,
           label: props.label,
@@ -731,11 +759,11 @@ window.__ModuleLoader__.load({
 
     /** 状态点元素：原生 StateDot 只认 done/warning/error/idle，插件状态要翻译一道。 */
     function dot(status) {
-      if (UI !== null) {
+      if (UI() !== null) {
         return e(
           'span',
           { style: { marginTop: 7, display: 'inline-flex' } },
-          e(UI.StateDot, {
+          e(UI().StateDot, {
             state: status === 'broken' ? 'error' : status === 'warning' ? 'warning' : 'done',
             size: 8,
           }),
@@ -746,7 +774,7 @@ window.__ModuleLoader__.load({
 
     /** 标签元素。tone 走外壳的语义色（被遮蔽 = warning，DSH 会跳过 = danger）。 */
     function chip(tone, children, key) {
-      if (UI !== null) return e(UI.Tag, { key: key, tone: tone || 'outline' }, children)
+      if (UI() !== null) return e(UI().Tag, { key: key, tone: tone || 'outline' }, children)
       return e('span', { key: key, style: S.tag }, children)
     }
 
@@ -890,7 +918,7 @@ window.__ModuleLoader__.load({
     function DialogHost(props) {
       var dialog = props.dialog
       var spec = dialog ? dialogSpec(dialog) : null
-      if (UI === null || spec === null) return null
+      if (UI() === null || spec === null) return null
 
       var roots = props.roots || []
       var busy = props.busy === true
@@ -920,7 +948,7 @@ window.__ModuleLoader__.load({
             'div',
             { key: 'name', style: { display: 'flex', flexDirection: 'column', gap: 4 } },
             e('span', { className: 'dsh-sm-dialog-path' }, spec.nameLabel),
-            e(UI.Input, {
+            e(UI().Input, {
               className: 'dsh-sm-field',
               value: draft.name,
               autoFocus: true,
@@ -949,7 +977,7 @@ window.__ModuleLoader__.load({
       }
 
       return e(
-        UI.Modal,
+        UI().Modal,
         {
           open: true,
           title: spec.title,
@@ -957,9 +985,9 @@ window.__ModuleLoader__.load({
           closeLabel: t('close'),
           onClose: close,
           footer: [
-            e(UI.Button, { key: 'cancel', variant: 'outline', disabled: busy, onClick: close }, t('cancel')),
+            e(UI().Button, { key: 'cancel', variant: 'outline', disabled: busy, onClick: close }, t('cancel')),
             e(
-              UI.Button,
+              UI().Button,
               {
                 key: 'confirm',
                 variant: 'outline',
@@ -979,11 +1007,11 @@ window.__ModuleLoader__.load({
 
     /** 成功提示：外壳顶部那条深色浮条，3 秒后自己淡出（onDone 回来清状态）。 */
     function ToastHost(props) {
-      if (UI === null || !props.toast) return null
-      return e(UI.Toast, {
+      if (UI() === null || !props.toast) return null
+      return e(UI().Toast, {
         key: props.toast.id,
         text: props.toast.text,
-        icon: e(UI.IconCheckOutline, { size: 14 }),
+        icon: e(UI().IconCheckOutlineRegular, { size: 14 }),
         anchor: props.anchor || null,
         holdMs: 3000,
         onDone: props.onDone,
@@ -1031,7 +1059,7 @@ window.__ModuleLoader__.load({
                 return issue.level !== 'info'
               })
               .map(function (issue, index) {
-                var mark = icon('IconWarningOutline', 14)
+                var mark = icon('IconWarningOutlineRegular', 14)
                 return e(
                   'div',
                   { key: index, style: issue.level === 'error' ? S.issueError : S.issue },
@@ -1540,7 +1568,7 @@ window.__ModuleLoader__.load({
       var groups = groupByRoot(data.skills, data.roots)
       var summary = data.summary
       // 新建按钮的前置图标：拿得到外壳图标就用它，文案换成无字形的那条（见 button 调用）。
-      var addIcon = icon('IconPlusOutline', 16)
+      var addIcon = icon('IconPlusOutlineRegular', 16)
 
       return e(
         'div',
@@ -1779,7 +1807,7 @@ window.__ModuleLoader__.load({
       /** 成功提示：有原生组件就走顶部 Toast，拿不到就退回面板内的绿字。 */
       var notify = function (text) {
         if (text === undefined || text === null || text === '') return
-        if (ui === null) {
+        if (UI() === null) {
           patch({ notice: text })
           return
         }
@@ -1965,7 +1993,7 @@ window.__ModuleLoader__.load({
           ).catch(noop)
         },
         onRename: function (skill) {
-          if (ui !== null) {
+          if (UI() !== null) {
             openDialog('rename', skill)
             return
           }
@@ -1974,7 +2002,7 @@ window.__ModuleLoader__.load({
           fallbackRun('rename', skill, { name: next })
         },
         onMove: function (skill) {
-          if (ui !== null) {
+          if (UI() !== null) {
             openDialog('move', skill)
             return
           }
@@ -1986,7 +2014,7 @@ window.__ModuleLoader__.load({
           fallbackRun('move', skill, { rootPath: target.path })
         },
         onCopy: function (skill) {
-          if (ui !== null) {
+          if (UI() !== null) {
             openDialog('copy', skill)
             return
           }
@@ -2000,7 +2028,7 @@ window.__ModuleLoader__.load({
           fallbackRun('copy', skill, { rootPath: target.path, name: newName })
         },
         onDelete: function (skill) {
-          if (ui !== null) {
+          if (UI() !== null) {
             openDialog('delete', skill)
             return
           }
@@ -2056,7 +2084,7 @@ window.__ModuleLoader__.load({
         },
         // 移除文件夹只解除管理，不动目录里的技能文件——所以确认框里也这么写。
         onRemoveDir: function (dir) {
-          if (ui !== null) {
+          if (UI() !== null) {
             openDialog('removeDir', dir)
             return
           }
@@ -2251,7 +2279,7 @@ window.__ModuleLoader__.load({
     function SidebarEntry(props) {
       var ctx = props.ctx
       // 入口图标：外壳的 skill 字形（文档 + 星点），拿不到才用原来的「◈」。
-      var glyph = icon('IconSkillOutline', 14)
+      var glyph = icon('IconSkillOutlineRegular', 14)
       var openState = useState(false)
       var open = openState[0]
       var setOpen = openState[1]
@@ -2425,7 +2453,6 @@ window.__ModuleLoader__.load({
     exports.CLASS = CLASS
     exports.CSS = CSS
     exports.STYLES = S
-    exports.UI = UI
     exports.callHost = callHost
     exports.statusColor = statusColor
     exports.groupByRoot = groupByRoot

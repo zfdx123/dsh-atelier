@@ -47,20 +47,31 @@ const MEMORY = {
   updated_rel: '刚刚',
 }
 
-/** 原生 UI 组件库桩：组件与图标都按 identity 在树里认。 */
+/**
+ * 原生 UI 组件库桩：组件与图标都按 identity 在树里认。
+ *
+ * `Button` 刻意做成 `React.forwardRef` 的**对象形状**（`$$typeof` + `render`），
+ * 而不是普通函数——外壳真实导出的就是 forwardRef。以前这里用普通函数，于是
+ * 「守门写成 `typeof kit.Button === 'function'`」这个 bug 一路绿灯：真实运行时
+ * `typeof` 恒为 `'object'`，整套原语被判不可用，主按钮与图标位全退回字形。
+ */
 function kitStub() {
   const marker = (name: string) => {
     const C = (props: Record<string, unknown>) => ({ type: C, props: props ?? {}, children: [] })
     C.displayName = name
     return C
   }
+  const forwardRef = (name: string) => {
+    const render = (props: Record<string, unknown>) => ({ type: render, props: props ?? {}, children: [] })
+    return { $$typeof: Symbol.for('react.forward_ref'), render, displayName: name }
+  }
   return {
     RiskConfirmation: marker('RiskConfirmation'),
-    Button: marker('Button'),
+    Button: forwardRef('Button'),
     Tag: marker('Tag'),
-    IconPlusOutline: marker('IconPlusOutline'),
-    IconRefreshOutline: marker('IconRefreshOutline'),
-    IconChevronDownOutline: marker('IconChevronDownOutline'),
+    IconPlusOutlineRegular: marker('IconPlusOutlineRegular'),
+    IconRefreshOutlineRegular: marker('IconRefreshOutlineRegular'),
+    IconChevronDownOutlineRegular: marker('IconChevronDownOutlineRegular'),
   }
 }
 
@@ -83,11 +94,19 @@ function mount(opts: { withKit?: boolean } = {}) {
   }
 
   const React = {
-    createElement: (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]): El => ({
-      type,
-      props: props ?? {},
-      children: children.flat(),
-    }),
+    // React 的真实行为：`type` 是 forwardRef 对象时渲染的是它的 `render`。
+    // 测试树里存的 `type` 因此是那个 render 函数，断言用 kit.Button.render 对。
+    createElement: (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]): El => {
+      let resolved: unknown = type
+      if (
+        typeof type === 'object' &&
+        type !== null &&
+        (type as { $$typeof?: unknown }).$$typeof === Symbol.for('react.forward_ref')
+      ) {
+        resolved = (type as { render: unknown }).render
+      }
+      return { type: resolved, props: props ?? {}, children: children.flat() }
+    },
     Fragment: Symbol('Fragment'),
     useState(init: unknown) {
       const i = cursor++
@@ -188,7 +207,7 @@ function mount(opts: { withKit?: boolean } = {}) {
   const buttonWith = (needle: string, node: unknown = tree): El[] =>
     findAll(
       (el) =>
-        (el.type === 'button' || el.type === kit.Button) &&
+        (el.type === 'button' || el.type === kit.Button.render) &&
         el.children.some((c) => typeof c === 'string' && c.includes(needle)),
       node,
     )
@@ -258,13 +277,13 @@ function mount(opts: { withKit?: boolean } = {}) {
 const tick = () => new Promise((r) => setTimeout(r, 10))
 
 describe('设置页图标走外壳原子（构建产物 lib/client.js）', () => {
-  it('有原语：添加按钮是原生 Button + IconPlusOutline，文案不带「＋」', async () => {
+  it('有原语：添加按钮是原生 Button + IconPlusOutlineRegular，文案不带「＋」', async () => {
     const h = mount()
     await h.start()
 
-    const add = h.findAll((el) => el.type === h.kit.Button && el.props.variant === 'primary')
+    const add = h.findAll((el) => el.type === h.kit.Button.render && el.props.variant === 'primary')
     assert.equal(add.length, 1, '添加按钮要渲染成原生 Button')
-    assert.equal(add[0]!.props.icon.type, h.kit.IconPlusOutline, '图标走 Button 的 icon 通道')
+    assert.equal(add[0]!.props.icon.type, h.kit.IconPlusOutlineRegular, '图标走 Button 的 icon 通道')
     assert.deepEqual(add[0]!.children, ['添加'], '有图标时文案里不再有「＋」')
   })
 
@@ -284,13 +303,13 @@ describe('设置页图标走外壳原子（构建产物 lib/client.js）', () =>
     )
   })
 
-  it('有原语：刷新按钮是原生 Button + IconRefreshOutline，文案不带「↻」', async () => {
+  it('有原语：刷新按钮是原生 Button + IconRefreshOutlineRegular，文案不带「↻」', async () => {
     const h = mount()
     await h.start()
 
-    const refresh = h.findAll((el) => el.type === h.kit.Button && el.props.title === '刷新')
+    const refresh = h.findAll((el) => el.type === h.kit.Button.render && el.props.title === '刷新')
     assert.equal(refresh.length, 1, '刷新按钮要渲染成原生 Button')
-    assert.equal(refresh[0]!.props.icon.type, h.kit.IconRefreshOutline)
+    assert.equal(refresh[0]!.props.icon.type, h.kit.IconRefreshOutlineRegular)
     assert.deepEqual(refresh[0]!.children, ['刷新'])
   })
 
@@ -325,7 +344,7 @@ describe('设置页图标走外壳原子（构建产物 lib/client.js）', () =>
     assert.deepEqual(chips[0]!.children, ['全局'])
   })
 
-  it('有原语：表单里「选择」按钮是原生 Button + IconChevronDownOutline，文案不带「▾」', async () => {
+  it('有原语：表单里「选择」按钮是原生 Button + IconChevronDownOutlineRegular，文案不带「▾」', async () => {
     const h = mount()
     await h.start()
     await h.openForm()
@@ -336,9 +355,9 @@ describe('设置页图标走外壳原子（构建产物 lib/client.js）', () =>
     pick!.props.onChange({ target: { value: '__custom__' } })
 
     form = h.renderForm()
-    const choose = h.findAll((el) => el.type === h.kit.Button && el.props.variant === 'ghost', form)
+    const choose = h.findAll((el) => el.type === h.kit.Button.render && el.props.variant === 'ghost', form)
     assert.equal(choose.length, 1, '切到自定义项目后应出现「选择」按钮')
-    assert.equal(choose[0]!.props.icon.type, h.kit.IconChevronDownOutline, '下拉箭头走 Button 的 icon 通道')
+    assert.equal(choose[0]!.props.icon.type, h.kit.IconChevronDownOutlineRegular, '下拉箭头走 Button 的 icon 通道')
     assert.deepEqual(choose[0]!.children, ['选择'])
   })
 

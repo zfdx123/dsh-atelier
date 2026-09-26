@@ -1004,57 +1004,147 @@ export function apply(ctx, config) {
 /**
  * 注册 `/api/skills/manager`。
  *
- * 这个接口能写任意技能根目录下的文件，所以必须有来源护栏。本版本的宿主组合里
- * **没有 `connection` 服务**（拿不到宿主的 Host/Origin 信任栅栏），因此走
- * `webServer.register` + 自带的回环来源校验：只接受来自本机的请求。
- * 绝不注册成无护栏的裸路由。
+ * 载具首选 `connection.fetch.register` 的**精确 Fetch 路由**：宿主负责 Host/Origin
+ * 信任栅栏与浏览器鉴权，而且 webserver 的 `match()` 先查 exact 再查 prefix，所以
+ * 精确路由能盖过 `/api` 前缀通道。
+ *
+ * 反过来走裸 `webServer.register` 会**静默失效**：`/api` 是 connection 服务持有的
+ * 共享 prefix 通道，它只接受 POST，其余一律回 `404 "not found"`
+ * （dsh-client-connection 的 `rpcFetchHandler` 守卫）。插件是 Node 处理器，桥接进去
+ * 的是原始 GET，因此裸路由永远收不到请求，管理界面表现为
+ * 「加载失败：Unexpected token 'o', "not found" is not valid JSON」。
+ * 实测证据：宿主路由表里 exact 有 `/plugins/events`、`/dsh-memery/*`、`/api-ext/*`，
+ * prefix 有 `/plugins`、`/api`、`/open-in-app/icon`，其中**没有** `/api/skills/manager`。
+ *
+ * 没有 `connection` 的组装（旧版 DSH / TUI）才退回裸路由，并自行施加同等护栏。
  *
  * @param {object} ctx Cordis 上下文
  * @param {(payload: unknown) => Promise<{status: number, body: object}>} handle 业务处理
  */
 function registerHttpApi(ctx, handle) {
-  const webServer = ctx.get('webServer')
-  if (webServer === undefined || typeof webServer.register !== 'function') {
-    ctx.logger.warn('dsh-skills-manager: webServer 服务不可用，管理界面无法连接宿主 API')
+  /** 从标准 Request 里取出载荷：GET 走查询串，POST 走 JSON body。 */
+  const payloadOf = async (request) => {
+    const method = String(request.method ?? '').toUpperCase()
+    if (method !== 'POST') {
+      const url = new URL(request.url)
+      const payload = { action: url.searchParams.get('action') ?? 'list' }
+      for (const [key, value] of url.searchParams) {
+        if (key !== 'action') payload[key] = value
+      }
+      return payload
+    }
+    const raw = (await request.text()).trim()
+    return raw === '' ? null : JSON.parse(raw)
+  }
+
+  const respond = (status, body, method) =>
+    // HEAD 必须回空体：带了体会让某些客户端认定响应非法。
+    new Response(String(method).toUpperCase() === 'HEAD' ? null : body, {
+      status,
+      headers: JSON_HEADERS,
+    })
+
+  const hasFetchRoute = (candidate) =>
+    candidate !== undefined &&
+    candidate !== null &&
+    candidate.fetch !== undefined &&
+    typeof candidate.fetch.register === 'function'
+
+  const registerFetchRoute = (connection) =>
+    ctx.effect(
+      () =>
+        connection.fetch.register({
+          path: API_PATH,
+          methods: ['GET', 'HEAD', 'POST'],
+          requestBody: 'buffered',
+          fetch: async (request) => {
+            let payload
+            try {
+              payload = await payloadOf(request)
+            } catch (error) {
+              return respond(
+                400,
+                JSON.stringify({ ok: false, error: `请求体不是合法 JSON：${String(error?.message ?? error)}` }),
+                request.method,
+              )
+            }
+            const result = await handle(payload)
+            return respond(result.status, JSON.stringify(result.body), request.method)
+          },
+        }),
+      'dsh-skills-manager: /api/skills/manager fetch route',
+    )
+
+  const connection = ctx.get('connection')
+  if (hasFetchRoute(connection)) {
+    registerFetchRoute(connection)
     return
   }
-  ctx.effect(
-    () =>
-      webServer.register({
-        kind: 'exact',
-        path: API_PATH,
-        handler: async (req, res) => {
-          const rejection = guardRequest(req)
-          if (rejection !== null) {
-            res.writeHead(rejection.status, JSON_HEADERS)
-            res.end(JSON.stringify({ ok: false, error: rejection.error }))
-            return
-          }
-          const method = String(req.method ?? '').toUpperCase()
-          let payload = null
-          try {
-            if (method === 'POST') {
-              const raw = await readNodeBody(req)
-              payload = raw.trim() === '' ? null : JSON.parse(raw)
-            } else {
-              const url = new URL(req.url ?? '/', 'http://localhost')
-              payload = { action: url.searchParams.get('action') ?? 'list' }
-              for (const [key, value] of url.searchParams) {
-                if (key !== 'action') payload[key] = value
-              }
+
+  const webServer = ctx.get('webServer')
+  let webRoute = null
+  if (webServer !== undefined && typeof webServer.register === 'function') {
+    webRoute = ctx.effect(
+      () =>
+        webServer.register({
+          kind: 'exact',
+          path: API_PATH,
+          handler: async (req, res) => {
+            // 护栏一：有 connection 就用宿主的 Host/Origin + 浏览器鉴权判定。
+            const live = ctx.get('connection')
+            const rejection =
+              live !== undefined && typeof live.requestRejection === 'function'
+                ? live.requestRejection(req)
+                : guardRequest(req) === null
+                  ? undefined
+                  : 403
+            if (rejection !== undefined) {
+              res.writeHead(rejection, JSON_HEADERS)
+              res.end(JSON.stringify({ ok: false, error: rejection === 401 ? 'unauthorized' : 'forbidden' }))
+              return
             }
-          } catch (error) {
-            res.writeHead(400, JSON_HEADERS)
-            res.end(JSON.stringify({ ok: false, error: `请求体不是合法 JSON：${String(error?.message ?? error)}` }))
-            return
-          }
-          const result = await handle(payload)
-          res.writeHead(result.status, JSON_HEADERS)
-          res.end(JSON.stringify(result.body))
-        },
-      }),
-    'dsh-skills-manager: http api',
-  )
+            const method = String(req.method ?? '').toUpperCase()
+            let payload = null
+            try {
+              if (method === 'POST') {
+                const raw = await readNodeBody(req)
+                payload = raw.trim() === '' ? null : JSON.parse(raw)
+              } else {
+                const url = new URL(req.url ?? '/', 'http://localhost')
+                payload = { action: url.searchParams.get('action') ?? 'list' }
+                for (const [key, value] of url.searchParams) {
+                  if (key !== 'action') payload[key] = value
+                }
+              }
+            } catch (error) {
+              res.writeHead(400, JSON_HEADERS)
+              res.end(JSON.stringify({ ok: false, error: `请求体不是合法 JSON：${String(error?.message ?? error)}` }))
+              return
+            }
+            const result = await handle(payload)
+            res.writeHead(result.status, JSON_HEADERS)
+            res.end(JSON.stringify(result.body))
+          },
+        }),
+      'dsh-skills-manager: http api',
+    )
+  } else {
+    ctx.logger.warn('dsh-skills-manager: connection.webServer 都不可用，管理界面无法连接宿主 API')
+  }
+
+  // 组合时序兜底：apply 阶段 connection 还没就绪时先走裸路由，等它出现再升级为
+  // 精确 Fetch 路由并撤掉裸路由——否则两条载具同时应答，实际行为（体积上限、
+  // HEAD 语义、缓存头）会因命中哪条而异。用 ctx.inject 而不是把 'connection'
+  // 加进顶层 inject 数组：后者会让插件在没有 connection 的组装里直接加载失败。
+  ctx.inject(['connection'], (childCtx) => {
+    const late = childCtx.get('connection')
+    if (!hasFetchRoute(late)) return
+    registerFetchRoute(late)
+    if (webRoute !== null) {
+      webRoute()
+      webRoute = null
+    }
+  })
 }
 
 /**

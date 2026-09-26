@@ -40,7 +40,7 @@ window.__ModuleLoader__.load({
         '在这里配置给我用的 MCP 服务器（Model Context Protocol）。保存后立即生效，每台服务器可单独「开启/关闭」：我会拿到 mcp__<名称>__<工具名> 形式的工具。',
       empty: '还没有配置任何 MCP 服务器。',
       // addServer 自带全角 ＋：拿不到外壳图标时它就是那个加号。拿得到图标时改用
-      // addServerNoIcon，字形交给 IconPlusOutline 画（否则一个加号画两遍）。
+      // addServerNoIcon，字形交给 IconPlusOutlineRegular 画（否则一个加号画两遍）。
       addServer: '＋ 添加服务器',
       addServerNoIcon: '添加服务器',
       refresh: '刷新',
@@ -246,16 +246,30 @@ window.__ModuleLoader__.load({
     var PRIMITIVES_ERROR = ''
     var UI = loadPrimitives()
 
+    /**
+     * 这个值能不能当 React 组件渲染。
+     *
+     * `typeof x === 'function'` **不够**：外壳的 `Button` 是 `React.forwardRef(...)`
+     * 的产物，`typeof` 恒为 `'object'`（实测 `$$typeof = Symbol(react.forward_ref)`、
+     * `render` 是函数）。以前每个成员都写成 `typeof primitives.X === 'function'`，
+     * 于是 Button 那一项恒假、整套原语被判不可用，主按钮与前置图标位全部退回字形。
+     */
+    function isRenderable(value) {
+      if (typeof value === 'function') return true
+      if (typeof value !== 'object' || value === null) return false
+      return value.$$typeof === Symbol.for('react.forward_ref') || value.$$typeof === Symbol.for('react.memo')
+    }
+
     function loadPrimitives() {
       try {
         var primitives = require(PRIMITIVES)
         if (
           primitives &&
-          typeof primitives.Button === 'function' &&
-          typeof primitives.Input === 'function' &&
-          typeof primitives.Switch === 'function' &&
-          typeof primitives.Tag === 'function' &&
-          typeof primitives.StateDot === 'function'
+          isRenderable(primitives.Button) &&
+          isRenderable(primitives.Input) &&
+          isRenderable(primitives.Switch) &&
+          isRenderable(primitives.Tag) &&
+          isRenderable(primitives.StateDot)
         ) {
           return primitives
         }
@@ -274,7 +288,7 @@ window.__ModuleLoader__.load({
      * （Button/Input/Switch 还有用），只把确认这一处降级成内联条。
      */
     function riskConfirmation() {
-      return UI !== null && typeof UI.RiskConfirmation === 'function' ? UI.RiskConfirmation : null
+      return UI !== null && isRenderable(UI.RiskConfirmation) ? UI.RiskConfirmation : null
     }
 
     /**
@@ -284,7 +298,7 @@ window.__ModuleLoader__.load({
      * 带图标」，无障碍名、语言切换与图标本身会绑死在一起。
      */
     function iconNode(name) {
-      return UI !== null && typeof UI[name] === 'function' ? e(UI[name], {}) : null
+      return UI !== null && isRenderable(UI[name]) ? e(UI[name], {}) : null
     }
 
     // ── 主题 ────────────────────────────────────────────────────────────────
@@ -922,7 +936,7 @@ window.__ModuleLoader__.load({
                 button(
                   {
                     key: 'edit',
-                    icon: iconNode('IconEditOutline'),
+                    icon: iconNode('IconEditOutlineRegular'),
                     disabled: busy,
                     onClick: function () {
                       props.onEdit(server)
@@ -934,7 +948,7 @@ window.__ModuleLoader__.load({
                   {
                     key: 'delete',
                     danger: true,
-                    icon: iconNode('IconTrashOutline'),
+                    icon: iconNode('IconTrashOutlineRegular'),
                     disabled: busy,
                     onClick: function () {
                       props.onAsk(server, 'delete')
@@ -1252,9 +1266,9 @@ window.__ModuleLoader__.load({
         })
       })
 
-      // 「添加服务器」的加号：外壳这一版有 IconPlusOutline 就交给它画，否则留给字典
+      // 「添加服务器」的加号：外壳这一版有 IconPlusOutlineRegular 就交给它画，否则留给字典
       // 文案里的全角 ＋（两条路都只用一次加号，见下面的按钮）。
-      var addIcon = iconNode('IconPlusOutline')
+      var addIcon = iconNode('IconPlusOutlineRegular')
 
       return e(
         'div',
@@ -1294,7 +1308,7 @@ window.__ModuleLoader__.load({
               },
               addIcon === null ? t('addServer') : t('addServerNoIcon'),
             ),
-        e('div', { style: S.actions }, button({ icon: iconNode('IconRefreshOutline'), onClick: load }, t('refresh'))),
+        e('div', { style: S.actions }, button({ icon: iconNode('IconRefreshOutlineRegular'), onClick: load }, t('refresh'))),
       )
     }
 

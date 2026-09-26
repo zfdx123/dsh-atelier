@@ -143,15 +143,31 @@ window.__ModuleLoader__.load({
      * look. Null means the delete still works through the browser's own
      * confirmation, and every glyph falls back to the hand-drawn SVG.
      */
+    /**
+     * Whether a value can be rendered as a React component.
+     *
+     * `typeof x === 'function'` is NOT enough: the shell's `Button` is built with
+     * `React.forwardRef(...)`, so its `typeof` is always `'object'`
+     * (`$$typeof = Symbol(react.forward_ref)`, `render` is the function). A guard
+     * that asks for `typeof primitives.Button === 'function'` is therefore always
+     * false, which throws away the whole kit even though Modal/Input/Switch really
+     * are functions — the failure looks like "only the icons are wrong".
+     */
+    function isRenderable(value) {
+      if (typeof value === 'function') return true
+      if (typeof value !== 'object' || value === null) return false
+      return value.$$typeof === Symbol.for('react.forward_ref') || value.$$typeof === Symbol.for('react.memo')
+    }
+
     function loadPrimitives(require) {
       try {
         const primitives = require(PRIMITIVES)
         if (
-          typeof primitives?.Modal === 'function' &&
-          typeof primitives?.Button === 'function' &&
-          typeof primitives?.IconSearchOutline === 'function' &&
-          typeof primitives?.IconChevronDownOutline === 'function' &&
-          typeof primitives?.IconTrashOutline === 'function'
+          isRenderable(primitives?.Modal) &&
+          isRenderable(primitives?.Button) &&
+          isRenderable(primitives?.IconSearchOutlineRegular) &&
+          isRenderable(primitives?.IconChevronDownOutlineRegular) &&
+          isRenderable(primitives?.IconTrashOutlineRegular)
         )
           return primitives
       } catch (error) {
@@ -701,7 +717,7 @@ window.__ModuleLoader__.load({
               React.createElement(Glyph, {
                 key: 'chevron',
                 primitives,
-                name: 'IconChevronDownOutline',
+                name: 'IconChevronDownOutlineRegular',
                 size: 12,
                 box: Object.assign({}, S.chevron, collapsed ? S.chevronFolded : {}),
                 fallback: ChevronIcon,
@@ -723,7 +739,7 @@ window.__ModuleLoader__.load({
           React.createElement(Glyph, {
             key: 'i',
             primitives,
-            name: 'IconSearchOutline',
+            name: 'IconSearchOutlineRegular',
             size: 16,
             box: S.searchGlyph,
             fallback: SearchIcon,
@@ -981,7 +997,7 @@ window.__ModuleLoader__.load({
      * root mounted behind it. Null keeps the hand-drawn SVG above in charge.
      */
     function kitTrashIcon(primitives) {
-      const Icon = kitIcon(primitives, 'IconTrashOutline')
+      const Icon = kitIcon(primitives, 'IconTrashOutlineRegular')
       if (Icon === null) return null
       try {
         const scratch = document.createElement('span')
@@ -992,7 +1008,7 @@ window.__ModuleLoader__.load({
         root.unmount()
         return node
       } catch (error) {
-        report('icon-fallback', { icon: 'IconTrashOutline', message: String(error?.message ?? error) })
+        report('icon-fallback', { icon: 'IconTrashOutlineRegular', message: String(error?.message ?? error) })
         return null
       }
     }

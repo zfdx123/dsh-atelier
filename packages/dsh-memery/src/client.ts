@@ -101,7 +101,7 @@ const ZH: Record<string, string> = {
   unresolved: '（未解析）',
   currentOption: ' · 当前对话',
   add: '＋ 添加',
-  // 无字形孪生键：外壳 IconPlusOutline 顶掉「＋」以后用这条（按钮与引用它的空态）。
+  // 无字形孪生键：外壳 IconPlusOutlineRegular 顶掉「＋」以后用这条（按钮与引用它的空态）。
   addPlain: '添加',
   countGlobal: '全局库 {n} 条',
   count: '{n} 条',
@@ -113,7 +113,7 @@ const ZH: Record<string, string> = {
   statusAll: '全部状态',
   refresh: '↻ 刷新',
   refreshTitle: '刷新',
-  // 无字形孪生键：外壳 IconRefreshOutline 顶掉「↻」以后用这条。
+  // 无字形孪生键：外壳 IconRefreshOutlineRegular 顶掉「↻」以后用这条。
   refreshPlain: '刷新',
   emptyGlobal:
     '全局库还没有记忆。「＋ 添加」会直接写进跨工作区共享的全局库；或在某个工作区视图里添加并选项目「全局」。',
@@ -158,7 +158,7 @@ const ZH: Record<string, string> = {
   customProjectPlaceholder: '输入新项目名…',
   customProject: '自定义项目…',
   choose: '▾ 选择',
-  // 无字形孪生键：外壳 IconChevronDownOutline 顶掉「▾」以后用这条。
+  // 无字形孪生键：外壳 IconChevronDownOutlineRegular 顶掉「▾」以后用这条。
   choosePlain: '选择',
   titlePlaceholder: '可选（topic/project 建议给）',
   contentPlaceholder: '记忆正文：fact/lesson 一句话直陈（≤80 字）；project 可写较长的结构/决策说明',
@@ -191,7 +191,7 @@ const EN: Record<string, string> = {
   unresolved: '(unresolved)',
   currentOption: ' · current conversation',
   add: '＋ Add',
-  // Icon-less twin of `add`: used once the shell's IconPlusOutline leads the button.
+  // Icon-less twin of `add`: used once the shell's IconPlusOutlineRegular leads the button.
   addPlain: 'Add',
   countGlobal: 'Global library · {n}',
   count: 'Memories · {n}',
@@ -203,7 +203,7 @@ const EN: Record<string, string> = {
   statusAll: 'All statuses',
   refresh: '↻ Refresh',
   refreshTitle: 'Refresh',
-  // Icon-less twin of `refresh`: used once the shell's IconRefreshOutline leads the button.
+  // Icon-less twin of `refresh`: used once the shell's IconRefreshOutlineRegular leads the button.
   refreshPlain: 'Refresh',
   emptyGlobal:
     'The global library has no memories yet. “＋ Add” writes straight into the shared cross-workspace library, or add from a workspace view and pick the project 全局.',
@@ -250,7 +250,7 @@ const EN: Record<string, string> = {
   customProjectPlaceholder: 'Type a new project name…',
   customProject: 'Custom project…',
   choose: '▾ Choose',
-  // Icon-less twin of `choose`: used once the shell's IconChevronDownOutline leads the button.
+  // Icon-less twin of `choose`: used once the shell's IconChevronDownOutlineRegular leads the button.
   choosePlain: 'Choose',
   titlePlaceholder: 'Optional (recommended for topic/project)',
   contentPlaceholder:
@@ -335,12 +335,30 @@ interface HostUi {
    */
   Button?: KitAtom
   Tag?: KitAtom
-  IconPlusOutline?: KitAtom
-  IconRefreshOutline?: KitAtom
-  IconChevronDownOutline?: KitAtom
+  IconPlusOutlineRegular?: KitAtom
+  IconRefreshOutlineRegular?: KitAtom
+  IconChevronDownOutlineRegular?: KitAtom
 }
 
 let hostUiCache: HostUi | null | undefined
+
+/**
+ * 这个值能不能当作 React 组件渲染。
+ *
+ * `typeof x === 'function'` **不够**：外壳的 `Button` 是 `React.forwardRef(...)`
+ * 的产物，`typeof` 永远是 `'object'`（实测 `$$typeof = Symbol(react.forward_ref)`、
+ * `render` 是函数）。以前每一处守门都写成 `typeof kit.Button === 'function'`，
+ * 于是守卫恒假、整套原语被判不可用——界面看着正常（Modal/Input 这些确实是函数），
+ * 只有走 Button 的图标位和主按钮悄悄退回字形与自带样式。
+ *
+ * React 组件一共就这几种可渲染形态，其余一律当作不是组件。
+ */
+function isRenderable(value: unknown): boolean {
+  if (typeof value === 'function') return true
+  if (typeof value !== 'object' || value === null) return false
+  const marker = (value as { $$typeof?: unknown }).$$typeof
+  return marker === Symbol.for('react.forward_ref') || marker === Symbol.for('react.memo')
+}
 
 /**
  * 惰性取宿主原生 UI 组件库，取不到返回 null（调用方降级）。
@@ -358,7 +376,7 @@ export function hostUi(): HostUi | null {
   try {
     const load = typeof require === 'function' ? require : undefined
     const kit = load === undefined ? undefined : (load(UI_KIT_ID) as Partial<HostUi> | null | undefined)
-    if (kit !== undefined && kit !== null && typeof kit.RiskConfirmation === 'function') hostUiCache = kit as HostUi
+    if (kit !== undefined && kit !== null && isRenderable(kit.RiskConfirmation)) hostUiCache = kit as HostUi
   } catch {
     /* 宿主没有这个模块：保持 null，走降级路径 */
   }
@@ -372,16 +390,16 @@ export function hostUi(): HostUi | null {
  * 样式。逐原子判类型而不是只判「有没有组件库」：部分可用的组件库同样不该白屏。
  */
 function kitAtom(
-  name: 'Button' | 'Tag' | 'IconPlusOutline' | 'IconRefreshOutline' | 'IconChevronDownOutline',
+  name: 'Button' | 'Tag' | 'IconPlusOutlineRegular' | 'IconRefreshOutlineRegular' | 'IconChevronDownOutlineRegular',
 ): KitAtom | null {
   const kit = hostUi()
   const atom = kit === null ? undefined : kit[name]
-  return typeof atom === 'function' ? atom : null
+  return isRenderable(atom) ? (atom as KitAtom) : null
 }
 
 /** 外壳图标元素；拿不到这个图标时返回 null，文案随之退回带字形的那条。 */
 function kitIcon(
-  name: 'IconPlusOutline' | 'IconRefreshOutline' | 'IconChevronDownOutline',
+  name: 'IconPlusOutlineRegular' | 'IconRefreshOutlineRegular' | 'IconChevronDownOutlineRegular',
   size: number,
 ): React.ReactElement | null {
   const Icon = kitAtom(name)
@@ -731,7 +749,7 @@ function MemoryForm(props: {
               }),
               hostButton({
                 variant: 'ghost',
-                icon: kitIcon('IconChevronDownOutline', 14),
+                icon: kitIcon('IconChevronDownOutlineRegular', 14),
                 label: t('choosePlain'),
                 glyphLabel: t('choose'),
                 className: 'meowmem_btn',
@@ -986,8 +1004,8 @@ function MemorySettingsSection(props: Record<string, unknown>): React.ReactEleme
   const memories = data?.memories ?? []
   const kit = hostUi()
   // 「＋ 添加」「↻ 刷新」的前置图标：拿不到就整条退回自带按钮 + 字形文案。
-  const addIcon = kitIcon('IconPlusOutline', 16)
-  const refreshIcon = kitIcon('IconRefreshOutline', 16)
+  const addIcon = kitIcon('IconPlusOutlineRegular', 16)
+  const refreshIcon = kitIcon('IconRefreshOutlineRegular', 16)
 
   return el(
     'div',

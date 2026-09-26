@@ -15,7 +15,7 @@ import Schema from '@deepseek-ai/schemastery'
 import * as plugin from '../index.js'
 
 /** 搭一个最小可用的假宿主，返回装配结果与辅助调用。 */
-async function assemble() {
+async function assemble(options = {}) {
   const sandbox = await mkdtemp(join(tmpdir(), 'skillsmgr-assembly-'))
   const project = join(sandbox, 'proj')
   await mkdir(join(project, '.git'), { recursive: true })
@@ -25,7 +25,15 @@ async function assemble() {
     '---\nname: demo-skill\ndescription: A demo skill for assembly test.\n---\n\n# demo\n\nbody\n',
   )
 
-  const registered = { settings: [], routes: [], tools: [], providers: [], registryList: [], invalidations: 0 }
+  const registered = {
+    settings: [],
+    routes: [],
+    fetchRoutes: [],
+    tools: [],
+    providers: [],
+    registryList: [],
+    invalidations: 0,
+  }
   const effects = []
   const warnings = []
   // 忠实一点的状态机：settings 是带 revision 的存储，replace 会校验 expectedRevision。
@@ -112,8 +120,14 @@ async function assemble() {
           ? ctx.tools
           : service === 'skills'
             ? ctx.skillsService
-            : undefined,
+            : service === 'connection'
+              ? options.connection
+              : undefined,
     on: () => {},
+    // 组合时序兜底用的迟到注入：立即回调，模拟 connection 后到。
+    inject: (services, callback) => {
+      callback(ctx)
+    },
     effect: (factory) => {
       const disposer = factory()
       effects.push(typeof disposer === 'function' ? disposer : () => {})
@@ -503,6 +517,51 @@ test('skill_manager 工具的写操作也让技能目录失效', async () => {
   }
 })
 
+test('connection 可用时必须注册精确 Fetch 路由，而不是裸 webServer 路由', async () => {
+  // 回归：真实宿主里 `/api` 是 connection 服务持有的**共享 prefix 通道**，它只
+  // 接受 POST，非 POST 一律回 `404 "not found"`（dsh-client-connection 的
+  // rpcFetchHandler 守卫）。插件是 Node 处理器，桥接进去的是原始 GET，所以
+  // 挂在 webServer 上的裸路由**永远收不到请求**——管理界面表现为
+  // 「加载失败：Unexpected token 'o', "not found" is not valid JSON」。
+  //
+  // 正确载具是 connection.fetch 的精确路由表：webserver 的 match() 先查 exact
+  // 再查 prefix，所以精确路由能盖过 /api 前缀通道。mcp-manager 早就是这么做的。
+  const registeredFetchRoutes = []
+  const connection = {
+    fetch: {
+      register: (route) => {
+        registeredFetchRoutes.push(route)
+        return () => {}
+      },
+    },
+  }
+  const { sandbox, registered, warnings } = await assemble({ connection })
+  try {
+    assert.deepEqual(
+      registeredFetchRoutes.map((route) => route.path),
+      [plugin.API_PATH],
+      'connection 存在时应注册精确 Fetch 路由',
+    )
+    assert.deepEqual(registered.routes, [], 'connection 存在时不应再挂裸 webServer 路由')
+
+    // 路由必须声明处理器真正支持的方法：漏了 GET 会让已鉴权的读请求落到 404。
+    const route = registeredFetchRoutes[0]
+    assert.deepEqual([...route.methods].sort(), ['GET', 'HEAD', 'POST'])
+    assert.equal(typeof route.fetch, 'function')
+
+    // 处理器拿到的是标准 Request，必须真的走业务逻辑并回标准 Response。
+    const listed = await route.fetch(
+      new Request(`http://127.0.0.1:1${plugin.API_PATH}?action=list`, { method: 'GET' }),
+    )
+    assert.equal(listed.status, 200)
+    const payload = await listed.json()
+    assert.ok(Array.isArray(payload.data?.skills ?? payload.skills), 'GET list 应返回技能列表')
+    assert.deepEqual(warnings, [], '装配过程中不应有警告')
+  } finally {
+    await rm(sandbox, { recursive: true, force: true })
+  }
+})
+
 test('apply() 挂上 Config、HTTP 路由、skill_manager 工具与技能提供者', async () => {
   const { sandbox, registered, warnings } = await assemble()
   try {
@@ -591,6 +650,10 @@ test('settings 服务不可用时插件降级而不是拖垮整个 profile', asy
             }
           : undefined,
     on: () => {},
+    // 真实 Cordis 上下文总有 inject；本用例里 connection 不存在，回调里会直接返回。
+    inject: (services, callback) => {
+      callback(ctx)
+    },
     effect: (factory) => {
       factory()
     },
@@ -854,6 +917,9 @@ test('没有 webServer / tools 服务时 apply 不抛错（优雅降级）', asy
     settings: { register: () => {}, get: () => ({}) },
     get: () => undefined,
     on: () => {},
+    inject: (services, callback) => {
+      callback(ctx)
+    },
     effect: (factory) => {
       factory()
     },

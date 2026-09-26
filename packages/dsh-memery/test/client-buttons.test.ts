@@ -69,9 +69,9 @@ function kitStub() {
     RiskConfirmation: marker('RiskConfirmation'),
     Button: marker('Button'),
     Tag: marker('Tag'),
-    IconPlusOutline: marker('IconPlusOutline'),
-    IconRefreshOutline: marker('IconRefreshOutline'),
-    IconChevronDownOutline: marker('IconChevronDownOutline'),
+    IconPlusOutlineRegular: marker('IconPlusOutlineRegular'),
+    IconRefreshOutlineRegular: marker('IconRefreshOutlineRegular'),
+    IconChevronDownOutlineRegular: marker('IconChevronDownOutlineRegular'),
   }
 }
 
