@@ -32,7 +32,7 @@
     "dsh": "^0.1.7-rc.2"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2"
+    "@deepseek-ai/cordis": "^4.0.4"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {

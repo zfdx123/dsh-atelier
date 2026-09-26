@@ -33,7 +33,7 @@
     "dsh": "^0.1.7-rc.2"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/cordis": "^4.0.4",
     "@deepseek-ai/dsh-mcp-client": "^0.1.7-rc.2",
     "@deepseek-ai/dsh-settings": "^0.1.7-rc.2"
   },
@@ -47,7 +47,7 @@
     "undici": "^7.0.0 || ^8.0.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/cordis": "^4.0.4",
     "@deepseek-ai/dsh-mcp-client": "^0.1.7-rc.2"
   },
   "scripts": {
