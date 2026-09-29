@@ -14,7 +14,12 @@ import {
   mergeMountStatus,
   substituteSecretRefs,
   SECRET_REF_PATTERN,
+  isSessionInvalidError,
+  describeErrorText,
+  sessionInvalidMessage,
+  recoveryAllowed,
 } from '../lib/logic.js'
+import { unconfirmedMessage } from '../index.js'
 
 /**
  * 按 Loader 的方式解析本插件的 Config，返回归一化后的服务器列表。
@@ -631,8 +636,7 @@ describe('mergeMountStatus：启动前置检查的判定不被异步失败顶掉
   })
 })
 
-describe('substituteSecretRefs（密钥引用解析，不入盘）', () => {
-  it('env:/cred: 引用被替换，非引用值原样保留', async () => {
+describe('substituteSecretRefs（密钥引用解析，不入盘）', () => {  it('env:/cred: 引用被替换，非引用值原样保留', async () => {
     const config = {
       serverName: 's',
       transport: 'stdio',
@@ -671,5 +675,131 @@ describe('substituteSecretRefs（密钥引用解析，不入盘）', () => {
     assert.doesNotMatch('env:1BAD', SECRET_REF_PATTERN)
     assert.doesNotMatch('env:BAD-NAME', SECRET_REF_PATTERN)
     assert.doesNotMatch('plain', SECRET_REF_PATTERN)
+  })
+})
+
+// ── 会话失效（session not found）─────────────────────────────────────────
+// 判据必须**窄**：只有真的「服务端把会话回收了」才允许重挂实例。把业务错误
+// （超时、参数错、500）也判成会话失效，等于拿重启用户的服务器去掩盖一个业务错误。
+describe('isSessionInvalidError（会话失效识别）', () => {
+  it('实测原文："Error POSTing to endpoint: session not found"', () => {
+    assert.equal(isSessionInvalidError(new Error('Error POSTing to endpoint: session not found')), true)
+  })
+
+  it('同类措辞：session expired / invalid session / during session initialization', () => {
+    for (const text of [
+      'session expired',
+      'Session has expired',
+      'invalid session id',
+      'method "tools/list" is invalid during session initialization',
+    ]) {
+      assert.equal(isSessionInvalidError(new Error(text)), true, text)
+    }
+  })
+
+  it('cause 链里的会话失效也算（工具层会再包一层）', () => {
+    const inner = new Error('Error POSTing to endpoint: session not found')
+    const outer = new Error('tool call failed')
+    outer.cause = inner
+    assert.equal(isSessionInvalidError(outer), true)
+  })
+
+  it('状态码/错误码参与判定（404 + session 文本）', () => {
+    const error = new Error('session not found')
+    error.status = 404
+    assert.equal(isSessionInvalidError(error), true)
+  })
+
+  it('业务错误一律不认（绝不误伤）', () => {
+    for (const text of [
+      'tool call timeout after 60000ms',
+      'request failed with status 500',
+      'missing required argument: text',
+      'ECONNREFUSED 127.0.0.1:8091',
+      'fetch failed',
+      '',
+    ]) {
+      assert.equal(isSessionInvalidError(new Error(text)), false, JSON.stringify(text))
+    }
+  })
+
+  it('非 Error 输入不炸', () => {
+    for (const value of [null, undefined, 0, '', {}, { message: 42 }, []]) {
+      assert.equal(isSessionInvalidError(value), false, JSON.stringify(value))
+    }
+  })
+
+  it('自引用 cause 链不会死循环', () => {
+    const error = new Error('session not found')
+    error.cause = error
+    assert.equal(isSessionInvalidError(error), true)
+  })
+
+  it('describeErrorText 汇总 message 链与状态码', () => {
+    const inner = new Error('inner')
+    const outer = new Error('outer')
+    outer.status = 404
+    outer.cause = inner
+    assert.match(describeErrorText(outer), /outer/)
+    assert.match(describeErrorText(outer), /404/)
+    assert.match(describeErrorText(outer), /inner/)
+  })
+})
+
+describe('sessionInvalidMessage（抛给模型的那句话）', () => {
+  it('已重挂：明确说「请重试本次调用」', () => {
+    assert.match(sessionInvalidMessage('logs', true, 3), /服务器 "logs" 的 MCP 会话已失效，已自动重新初始化，请重试本次调用/)
+  })
+
+  it('已超限：给可照做的人工动作（设置页关闭再开启 / 重启 Host）', () => {
+    const message = sessionInvalidMessage('logs', false, 3)
+    assert.match(message, /已达上限（3 次）/)
+    assert.match(message, /关闭/)
+    assert.match(message, /重启 Host/)
+  })
+})
+
+describe('recoveryAllowed（重挂限流）', () => {
+  const now = 1_000_000
+  const WINDOW = 300_000
+
+  it('窗口内未达上限 → 允许', () => {
+    assert.equal(recoveryAllowed([], now, { limit: 3, windowMs: WINDOW }), true)
+    assert.equal(recoveryAllowed([now - 1000, now - 2000], now, { limit: 3, windowMs: WINDOW }), true)
+  })
+
+  it('窗口内已达上限 → 拒绝', () => {
+    assert.equal(recoveryAllowed([now - 1, now - 2, now - 3], now, { limit: 3, windowMs: WINDOW }), false)
+  })
+
+  it('超出窗口的历史不计数（滑动窗口）', () => {
+    const old = [now - WINDOW - 1, now - WINDOW - 2, now - WINDOW - 3]
+    assert.equal(recoveryAllowed(old, now, { limit: 3, windowMs: WINDOW }), true)
+  })
+
+  it('脏输入不炸（非数组 / NaN）', () => {
+    assert.equal(recoveryAllowed(undefined, now, { limit: 3, windowMs: WINDOW }), true)
+    assert.equal(recoveryAllowed([NaN, undefined], now, { limit: 3, windowMs: WINDOW }), true)
+  })
+})
+
+describe('unconfirmedMessage（确认窗口超时的文案按传输分流）', () => {
+  it('stdio：提示查 command/args/cwd 与可执行文件，不提证书', () => {
+    const message = unconfirmedMessage('local', 20000, 'stdio')
+    assert.match(message, /已挂载但 20 秒内未确认连上/)
+    assert.match(message, /command\/args\/cwd/)
+    assert.doesNotMatch(message, /证书/)
+    assert.doesNotMatch(message, /端口/)
+  })
+
+  it('streamable-http：沿用地址/端口/证书口径', () => {
+    const message = unconfirmedMessage('remote', 20000, 'streamable-http')
+    assert.match(message, /地址\/端口可达/)
+    assert.match(message, /证书受信任/)
+  })
+
+  it('缺省 transport 视为 HTTP（老调用点行为不变）', () => {
+    assert.match(unconfirmedMessage('remote', 5000), /地址\/端口可达/)
+    assert.match(unconfirmedMessage('remote', 5000), /5 秒/)
   })
 })

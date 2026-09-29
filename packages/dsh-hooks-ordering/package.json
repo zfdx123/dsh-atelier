@@ -1,6 +1,6 @@
 {
   "name": "@zfdx123/dsh-hooks-ordering",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "钩子排序：为 Cordis 的 waterfall / serial 钩子提供确定性的 before/after 排序，让互相独立的插件能声明彼此的先后关系（拓扑排序、环检测、可配置控制集与设置页）。",
   "keywords": [
     "cordis",
@@ -61,11 +61,11 @@
   ],
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
-    "dsh": "^0.1.7-rc.2"
+    "dsh": "^0.1.7-rc.2 || ^0.2.0-rc.1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-settings": "^0.1.7-rc.2"
+    "@deepseek-ai/dsh-settings": "^0.1.7-rc.2 || ^0.2.0-rc.1"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-settings": {

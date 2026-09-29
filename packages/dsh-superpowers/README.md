@@ -1,6 +1,6 @@
 # @zfdx123/dsh-superpowers
 
-把 [obra/superpowers](https://github.com/obra/superpowers) 的软件开发方法论接进 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：在 `ctx.skills` 上注册 15 个技能（需求澄清、任务规划、TDD、系统化调试、代码审查、会话诊断等），并把 `using-superpowers` 引导语作为系统提示词段落注入，让它从第一条请求起就生效、在上下文压缩后依然存在。技能是**运行时注册**的、不落盘，所以既不往 `~/.dsh/skills` 复制任何文件，也不要求改动预设或 profile 里的技能目录。当前版本 1.0.9，面向 DSH `^0.1.7-rc.2`。
+把 [obra/superpowers](https://github.com/obra/superpowers) 的软件开发方法论接进 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：在 `ctx.skills` 上注册 15 个技能（需求澄清、任务规划、TDD、系统化调试、代码审查、会话诊断等），并把 `using-superpowers` 引导语作为系统提示词段落注入，让它从第一条请求起就生效、在上下文压缩后依然存在。技能是**运行时注册**的、不落盘，所以既不往 `~/.dsh/skills` 复制任何文件，也不要求改动预设或 profile 里的技能目录。当前版本 1.0.10，面向 DSH `^0.1.7-rc.2 || ^0.2.0-rc.1`。
 
 ## 安装
 
@@ -59,9 +59,9 @@ dsh --profile web --dump-config
 
 ## 前置要求
 
-- DeepSeek Harness `^0.1.7-rc.2`（`engines.dsh`）
+- DeepSeek Harness `^0.1.7-rc.2 || ^0.2.0-rc.1`（`engines.dsh`）
 - Node `^22.19.0 || >=24.0.0`
-- peer `@deepseek-ai/cordis ^4.0.4`，以及可选的 peer `@deepseek-ai/dsh-skill`、`@deepseek-ai/dsh-system-prompt`（均为 `^0.1.7-rc.2`）
+- peer `@deepseek-ai/cordis ^4.0.4`，以及可选的 peer `@deepseek-ai/dsh-skill`、`@deepseek-ai/dsh-system-prompt`（均为 `^0.1.7-rc.2 || ^0.2.0-rc.1`）
 - 一个运行时依赖 `@deepseek-ai/schemastery`（提供配置 schema）：从 registry 安装会自动带上；用 `link:` 安装需要先在检出目录执行 `npm install`，否则插件加载失败
 
 ## 已知限制

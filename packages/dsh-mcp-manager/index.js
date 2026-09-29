@@ -51,6 +51,10 @@ import {
   mcpClientLogToStatus,
   mergeMountStatus,
   substituteSecretRefs,
+  isSessionInvalidError,
+  sessionInvalidMessage,
+  recoveryAllowed,
+  SESSION_RECOVERING_MESSAGE,
 } from './lib/logic.js'
 import { API_PATH, createApiHandler, isLoopbackRequest, readNodeBody } from './lib/api.js'
 import { claimEntry, declaredKeys } from './lib/claim.js'
@@ -89,8 +93,17 @@ export const Config = ServersSchema
  */
 export const CONFIRM_TIMEOUT_MS = 20000
 
-/** stdio 的确认窗口：spawn 失败是立即的（ENOENT/EACCES 亚秒级），不必等满 HTTP 那一档。 */
-export const CONFIRM_TIMEOUT_STDIO_MS = 5000
+/**
+ * stdio 的确认窗口。
+ *
+ * 曾经是 5 秒，理由是「spawn 失败是立即的（ENOENT/EACCES 亚秒级）」。那个理由只
+ * 覆盖**失败**，不覆盖**冷启动**：stdio 服务器常常要先 import 一堆依赖、跑
+ * asyncio.run(init_db())、起后台线程（实测 http-inspector 就是这样），冷启动
+ * 超过 5 秒是常态。窗口比真实启动时间短，就会在服务器即将就绪时抢先把卡片涂红
+ * ——那是纯粹的误报。所以与 HTTP 同级：都由传输层自己的超时兜底（见
+ * CONFIRM_TIMEOUT_MS），这里只负责覆盖「没有证据的那段时间」。
+ */
+export const CONFIRM_TIMEOUT_STDIO_MS = 20000
 
 /** 该传输的确认窗口（测试可用环境变量缩短）。 */
 function confirmTimeoutFor(transport) {
@@ -99,9 +112,23 @@ function confirmTimeoutFor(transport) {
   return transport === 'stdio' ? CONFIRM_TIMEOUT_STDIO_MS : CONFIRM_TIMEOUT_MS
 }
 
-/** 确认窗口超时后的文案：说清楚「实例在、但没连上」，而不是含糊的「失败」。 */
-export function unconfirmedMessage(serverName, timeoutMs) {
-  return `已挂载但 ${Math.round(timeoutMs / 1000)} 秒内未确认连上：服务器没有回应，也没有注册任何工具。请确认地址/端口可达、服务已启动、证书受信任（必要时开「允许自签名证书」）。`
+/**
+ * 确认窗口超时后的文案：说清楚「实例在、但没连上」，而且**按传输给可照做的检查项**。
+ *
+ * 曾经两种传输共用一句 HTTP 口径的话（「请确认地址/端口可达…证书受信任」），
+ * stdio 服务器看到它完全无从下手——它既没有地址也没有证书，要查的是
+ * command/args/cwd 与可执行文件。
+ * @param {string} serverName
+ * @param {number} timeoutMs
+ * @param {string} [transport]
+ * @returns {string}
+ */
+export function unconfirmedMessage(serverName, timeoutMs, transport = 'streamable-http') {
+  const seconds = Math.round(timeoutMs / 1000)
+  if (transport === 'stdio') {
+    return `已挂载但 ${seconds} 秒内未确认连上：进程没有回应，也没有注册任何工具。请确认 command/args/cwd 填对、可执行文件存在（必要时填绝对路径），并确认这条命令单独运行时能正常启动。`
+  }
+  return `已挂载但 ${seconds} 秒内未确认连上：服务器没有回应，也没有注册任何工具。请确认地址/端口可达、服务已启动、证书受信任（必要时开「允许自签名证书」）。`
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' }
@@ -243,17 +270,21 @@ export function apply(ctx, config) {
 
   /**
    * 标记「连上了」：有工具注册或成功日志时的唯一正向信号。取消确认窗口，
-   * 并把状态收敛成 ok（除非当前是前置检查写下的判定——那由 mergeMountStatus
-   * 的规则处理，不能在这里抢）。
+   * 并把状态收敛成 ok——**从任何状态收敛**。
+   *
+   * 走 mergeMountStatus 而不是窄条件 set：原来的条件
+   * （`connecting || (ok && message === '')`）漏掉了最重要的一种情形——确认窗口
+   * 已经把状态写成 error 之后，**晚到的正向证据翻不了案**。工具注册是异步的，
+   * 冷启动的 stdio 服务器完全可能在窗口结束后才注册工具，那时服务器明明能用，
+   * 卡片却永远红着（「判定粘性」）。顺带也把前置检查的误判清掉
+   * （mergeMountStatus 的规则：连接成功 = 启发式这次判断错了）。
    * @param {string} serverName
    */
   const confirmConnected = (serverName) => {
     cancelConfirmation(serverName)
     const current = mountState.get(serverName)
     if (current === undefined || current.state === 'disabled') return
-    if (current.state === 'connecting' || (current.state === 'ok' && current.message === '')) {
-      mountState.set(serverName, { state: 'ok', message: '', detail: false })
-    }
+    mountState.set(serverName, mergeMountStatus(current, { state: 'ok', message: '', detail: false }))
   }
 
   /**
@@ -271,7 +302,7 @@ export function apply(ctx, config) {
       if (current === undefined || current.state !== 'connecting') return
       mountState.set(server.serverName, {
         state: 'error',
-        message: unconfirmedMessage(server.serverName, timeout),
+        message: unconfirmedMessage(server.serverName, timeout, server.transport),
         detail: true,
       })
       ctx.logger.warn(`dsh-mcp-manager: 服务器 "${server.serverName}" 已挂载但未确认连上（${timeout}ms 内无回应）`)
@@ -291,17 +322,99 @@ export function apply(ctx, config) {
    * 做法是给注入进来的 `tools` 服务包一层 register 观察器（原样转发、原样返回
    * disposer），并在本插件 fiber 卸载时还原。服务缺失时不装：那只损失「提前转
    * 绿」，确认窗口的超时判定照旧兜底。
+   *
+   * 同一个观察器还顺便包一层 `definition.execute`（**只观察，原样转发，抛错原样
+   * 上抛**）来兜住「会话失效」——上游 SDK 对非 2xx 直接 throw，而 dsh-mcp-client
+   * 只挂 generation.onclose、没有任何会话重置逻辑，所以服务端一重启，之后每次
+   * 调用都拿着死 session 失败到天荒地老（见 lib/logic.js 的会话失效一节）。
    */
   const TAP_FLAG = Symbol.for('dsh-mcp-manager.toolRegistrationTap')
+  const EXEC_FLAG = Symbol.for('dsh-mcp-manager.sessionRecoveryTap')
+  /** serverName -> 滑动窗口内的重挂时间戳 */
+  const recoveryHistory = new Map()
+  /** 正在重挂的服务器（同一台不并发重挂两次） */
+  const recovering = new Set()
+  // 限流：5 分钟内最多 3 次。超限就转人工提示——无限重挂只会把服务端拖垮，
+  // 而用户看到的是「怎么一直在转圈」。
+  const RECOVERY_LIMIT = 3
+  const RECOVERY_WINDOW_MS = 300000
+
+  /**
+   * 会话失效后定向重挂那一台（unmountOne + mountOne，等价于设置页关掉再打开）。
+   *
+   * 不透明重放第一次调用是有意的：SDK 层拿不到新实例的 definition，而且第一次
+   * 调用确实没执行成功（404 早于执行），所以重试是安全的——但必须由发起方重试，
+   * 这里只负责把实例换新，然后由调用处把「请重试本次调用」抛给模型。
+   * @param {string} serverName
+   * @returns {boolean} 是否真的发起了重挂（false = 已超限/服务器已不在配置里）
+   */
+  const recoverSession = (serverName) => {
+    const now = Date.now()
+    const history = (recoveryHistory.get(serverName) ?? []).filter((at) => now - at < RECOVERY_WINDOW_MS)
+    recoveryHistory.set(serverName, history)
+    if (recovering.has(serverName)) return false
+    if (!recoveryAllowed(history, now, { limit: RECOVERY_LIMIT, windowMs: RECOVERY_WINDOW_MS })) return false
+    // 服务器可能已经被移出配置：那时重挂没有意义（也拿不到配置）。
+    const server = readServers().find((candidate) => candidate.serverName === serverName)
+    if (server === undefined) return false
+    history.push(now)
+    recovering.add(serverName)
+    // 卡片先呈现「重新初始化中」，避免用户以为它还好着。
+    mountState.set(serverName, mergeMountStatus(mountState.get(serverName), {
+      state: 'connecting',
+      message: SESSION_RECOVERING_MESSAGE,
+      detail: false,
+    }))
+    ctx.logger.warn(
+      `dsh-mcp-manager: 服务器 "${serverName}" 的 MCP 会话已失效，正在重新初始化（${history.length}/${RECOVERY_LIMIT} 次）`,
+    )
+    mountOne(server)
+      .catch((error) => {
+        ctx.logger.warn(`dsh-mcp-manager: 服务器 "${serverName}" 重新初始化失败：${String((error && error.message) || error)}`)
+      })
+      .finally(() => recovering.delete(serverName))
+    return true
+  }
+
   const observeToolRegistration = () => {
     ctx.inject(['tools'], (childCtx) => {
       const tools = childCtx.get('tools')
       if (tools === undefined || tools === null || tools[TAP_FLAG] === true) return
       if (typeof tools.register !== 'function') return
       const original = tools.register
+
+      /**
+       * 只包一层 execute：原样转发 this/参数/返回值，抛错按需翻译后原样上抛。
+       * 不做重放（见 recoverSession）。
+       */
+      const wrapExecute = (definition, serverName) => {
+        if (definition === null || typeof definition !== 'object') return definition
+        if (typeof definition.execute !== 'function' || definition[EXEC_FLAG] === true) return definition
+        const originalExecute = definition.execute
+        definition.execute = async function observedExecute(...args) {
+          try {
+            return await originalExecute.apply(this, args)
+          } catch (error) {
+            if (!isSessionInvalidError(error)) throw error
+            const recovered = recoverSession(serverName)
+            ctx.logger.warn(
+              `dsh-mcp-manager: 服务器 "${serverName}" 的工具调用失败（MCP 会话已失效）：${
+                recovered ? '已自动重新初始化' : `自动重新初始化未发起（已达上限 ${RECOVERY_LIMIT} 次或服务器已移除）`
+              }`,
+            )
+            throw new Error(sessionInvalidMessage(serverName, recovered, RECOVERY_LIMIT), { cause: error })
+          }
+        }
+        Object.defineProperty(definition, EXEC_FLAG, { value: true, configurable: true })
+        return definition
+      }
+
       tools.register = function observedRegister(definition, ...rest) {
         const serverName = mcpToolServerName(definition !== null && typeof definition === 'object' ? definition.name : undefined)
-        if (serverName !== null) confirmConnected(serverName)
+        if (serverName !== null) {
+          confirmConnected(serverName)
+          wrapExecute(definition, serverName)
+        }
         return original.call(this, definition, ...rest)
       }
       Object.defineProperty(tools, TAP_FLAG, { value: true, configurable: true })

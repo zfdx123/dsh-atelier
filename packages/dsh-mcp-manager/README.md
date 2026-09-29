@@ -201,9 +201,9 @@ mcp:
 | 组件 | 版本要求 |
 |---|---|
 | Node | **`^22.19.0 \|\| >=24.0.0`**（`undici` 8.x 的下限是 22.19.0；`@deepseek-ai/dsh-mcp-client` 依赖 `Promise.withResolvers`） |
-| DSH | **`^0.1.7-rc.2`**（`engines.dsh` 与 peer 范围；本包在 1.0.5 那一版按 `0.1.7-rc.2` 的设置 API 重写过，此前按 `0.1.6-alpha.2` 逐条核对过。`0.1.5` / `0.1.6-alpha.*` 系列也已核对，但已不在声明范围内） |
-| `@deepseek-ai/dsh-mcp-client` | `^0.1.7-rc.2`（peerDependency，由运行时提供；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
-| `@deepseek-ai/dsh-settings` | `^0.1.7-rc.2`（peerDependency，可选：`ctx.settings` 由宿主提供） |
+| DSH | **`^0.1.7-rc.2 || ^0.2.0-rc.1`**（`engines.dsh` 与 peer 范围；本包在 1.0.5 那一版按 `0.1.7-rc.2` 的设置 API 重写过，1.0.10 起同时声明并核对 `0.2.0-rc.1`。`0.1.5` / `0.1.6-alpha.*` 系列是更早的校对记录，已不在声明范围内） |
+| `@deepseek-ai/dsh-mcp-client` | `^0.1.7-rc.2 || ^0.2.0-rc.1`（peerDependency，由运行时提供；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
+| `@deepseek-ai/dsh-settings` | `^0.1.7-rc.2 || ^0.2.0-rc.1`（peerDependency，可选：`ctx.settings` 由宿主提供） |
 | `@deepseek-ai/cordis` | `^4.0.4`（peerDependency） |
 | `dsh` CLI + pnpm | `dsh plugin` 命令转发给 pnpm；本包按 profile 的 pnpm 布局安装 |
 
@@ -257,21 +257,43 @@ mcp:
   MCP_LOG_CONTRACT_PRINT=1 node test/log-contract.test.js
   ```
 
-  同时把 `devDependencies` 的 `@deepseek-ai/dsh-mcp-client` 钉在宿主当前版本（`^0.1.7-rc.2`），让本地测试与线上尽量同源。
+  同时把 `devDependencies` 的 `@deepseek-ai/dsh-mcp-client` 钉在宿主当前版本（`^0.1.7-rc.2`），让本地测试与线上尽量同源；本地测试跑 0.1.7-rc.2，`0.2.0-rc.1` 的核对结果见「0.2.0-rc.1 兼容性」一节。
 
 ### 兼容性
 
 | 组件 | 版本要求 |
 |---|---|
 | Node | **`^22.19.0 \|\| >=24.0.0`** |
-| DSH | **`0.1.7-rc.2`**（本包在 1.0.5 按该版本的设置 API 逐条重写过；`0.1.6-alpha.*` 与 `0.1.5` 系列是更早的校对记录，peer 范围现已收紧到 `^0.1.7-rc.2`） |
-| `@deepseek-ai/dsh-mcp-client` | `^0.1.7-rc.2`（peerDependency；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
-| `@deepseek-ai/dsh-settings` | `^0.1.7-rc.2`（peerDependency；`ctx.settings` 由宿主提供） |
+| DSH | **`0.2.0-rc.1`**（1.0.10 起声明支持；与 `0.1.7-rc.2` 共用同一条范围 `^0.1.7-rc.2 || ^0.2.0-rc.1`） |
+| `@deepseek-ai/dsh-mcp-client` | `^0.1.7-rc.2 || ^0.2.0-rc.1`（peerDependency；两个版本的本包源码逐字节相同，见下） |
+| `@deepseek-ai/dsh-settings` | `^0.1.7-rc.2 || ^0.2.0-rc.1`（peerDependency；`ctx.settings` 由宿主提供） |
 | `@deepseek-ai/cordis` | `^4.0.4` |
 
-### 历史修复记录（当前版本 1.0.9）
+### 0.2.0-rc.1 兼容性（1.0.10 起）
 
-本包版本已到 **1.0.9**；下面两张表是**历史**版本的修复记录，保留下来是因为它们记录了「代码为什么长这样」（表内的版本与 peer 范围是**当时**的，不是当前声明）。表里引用的 `0.1.5` / `0.1.6-alpha.x` 都是 **DSH 侧**（或 mcp-client 侧）的版本号，不是本包的版本。
+`0.2.0-rc.1` 与 `0.1.7-rc.2` 之间，本包用到的一方包**源码逐字节相同**（只差
+`package.json` 的版本号）：`dsh-mcp-client`、`dsh-settings`、`dsh-tools`、`dsh-llm`、
+`dsh-session`（仅新增导出 `ToolCallRecovery`）、`dsh-client-ui-primitives`（仅新增
+`pointerModality`）与 `dsh-util-values` 的公共面都是向后兼容的增量。真正的障碍是**声明**：
+
+- `0.2.0-rc.1` 的 `dsh plugin add` 会做安装期 peer 兼容性闸门。用
+  `semver.satisfies('0.2.0-rc.1', '^0.1.7-rc.2', { includePrerelease: true })` 判定为
+  **不兼容**（caret 在带 prerelease 时上界是 `<0.2.0-0`，而 `0.2.0-rc.1 > 0.2.0-0`），
+  于是安装被直接拒绝：`Plugin … is incompatible with dsh 0.2.0-rc.1`。所以范围必须显式
+  带上 `^0.2.0-rc.1`——这不是文档问题，是**装不装得上**的问题。
+- 宿主的根 Include 会把裸包名（非 `.`/`cordis:` 开头）用**宿主自己的安装位置**解析
+  （`dsh-app-boot` 的 `HostResolvedRootInclude`），所以插件运行时拿到的始终是宿主的
+  `dsh-*` 副本。peer 范围因此纯粹是**兼容性契约**，写宽写窄直接决定能不能装、以及在哪个
+  版本上被验证过。
+
+核对方式（可复现）：把本包源码复制一份、只改 `engines.dsh` 与 peer 范围，用隔离的
+`DSH_HOME` 装进 `0.2.0-rc.1` 的 web profile，7 个包全部安装成功、`--dump-config` 里 7 行
+齐备、真启动到 `dsh web: http://127.0.0.1:<port>/` 且无插件装载报错；同一份代码在
+`0.2.0-rc.1` 依赖下跑完本包全部单测与 E2E。
+
+### 历史修复记录（当前版本 1.0.10）
+
+本包版本已到 **1.0.10**；下面两张表是**历史**版本的修复记录，保留下来是因为它们记录了「代码为什么长这样」（表内的版本与 peer 范围是**当时**的，不是当前声明）。表里引用的 `0.1.5` / `0.1.6-alpha.x` 都是 **DSH 侧**（或 mcp-client 侧）的版本号，不是本包的版本。
 
 #### 0.3.4（历史）：按 DSH 0.1.6-alpha.1 的核对结果做的修复
 

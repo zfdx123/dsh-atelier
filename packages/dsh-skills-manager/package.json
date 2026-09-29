@@ -1,6 +1,6 @@
 {
   "name": "@zfdx123/dsh-skills-manager",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "DSH 技能管理器：诊断、新建、编辑、开关、搬运磁盘上的技能（SKILL.md），补上官方 provider 静默跳过坏文件的那半边，并给模型一个 skill_manager 工具",
   "license": "MIT",
   "homepage": "https://github.com/zfdx123/dsh-atelier/tree/main/packages/dsh-skills-manager#readme",
@@ -29,12 +29,12 @@
   ],
   "engines": {
     "node": ">=22",
-    "dsh": "^0.1.7-rc.2"
+    "dsh": "^0.1.7-rc.2 || ^0.2.0-rc.1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-settings": "^0.1.7-rc.2",
-    "@deepseek-ai/dsh-tools": "^0.1.7-rc.2"
+    "@deepseek-ai/dsh-settings": "^0.1.7-rc.2 || ^0.2.0-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.1.7-rc.2 || ^0.2.0-rc.1"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-settings": {

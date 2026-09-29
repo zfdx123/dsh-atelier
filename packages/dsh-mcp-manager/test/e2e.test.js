@@ -798,3 +798,136 @@ describe('端到端：修订号乐观锁（0.1.7 表单按 loader 条目 id 定�
     assert.equal(status, 200)
   })
 })
+
+// 两条真实故障的回归：
+//   ①「已挂载但 5 秒内未确认连上」——窗口太短（stdio 冷启动常超 5 秒）+ 判定粘性
+//     （窗口把状态写成 error 之后，晚到的工具注册翻不了案，卡片永远红着）+ 文案是
+//     HTTP 口径（stdio 服务器看到「地址/端口/证书」无从下手）。
+//   ②「session not found」——服务端重启回收会话后，上游 SDK 只抛错、dsh-mcp-client
+//     没有任何会话重置逻辑，于是之后每次调用都失败到手动重挂为止。
+// 这里用 FAKE_MCP_DELAY_MS 把 tools/list 推迟到确认窗口之后，精确复现「晚到证据」；
+// 再注册一个抛会话失效的工具定义，复现 mcp-client 的注册路径。
+describe('端到端：确认窗口的误判能被晚到证据翻案 + 会话失效自愈', () => {
+  let harness
+  let base
+  let disposer
+  const previousConfirm = process.env.DSH_MCP_MANAGER_CONFIRM_MS
+
+  before(async () => {
+    // 把确认窗口缩短到 250ms，而假服务器的 tools/list 推迟 3 秒——晚到证据是必然的。
+    process.env.DSH_MCP_MANAGER_CONFIRM_MS = '250'
+    harness = buildHarness()
+    disposer = harness.disposer
+    await harness.ready()
+    base = `http://127.0.0.1:${await harness.webServer.listen()}/api/mcp/servers`
+  })
+
+  after(async () => {
+    await harness.webServer.close()
+    await disposer.dispose()
+    if (previousConfirm === undefined) delete process.env.DSH_MCP_MANAGER_CONFIRM_MS
+    else process.env.DSH_MCP_MANAGER_CONFIRM_MS = previousConfirm
+  })
+
+  it('窗口超时先转 error，且文案是 stdio 口径（不是地址/端口/证书）', async () => {
+    await request(base, 'POST', {
+      servers: [STDIO('slow', { env: { FAKE_MCP_NAME: 'late', FAKE_MCP_DELAY_MS: '3000' } })],
+    })
+    const errored = await waitFor(
+      async () => {
+        const get = await request(base, 'GET')
+        return get.data.status.slow?.state === 'error' ? get.data.status.slow : undefined
+      },
+      { label: '确认窗口超时转 error', timeout: 5000 },
+    )
+    assert.match(errored.message, /已挂载但/)
+    assert.match(errored.message, /command\/args/, 'stdio 应提示查 command/args/cwd')
+    assert.doesNotMatch(errored.message, /证书受信任/, 'stdio 不该出现 HTTP 口径的证书提示')
+  })
+
+  it('晚到的工具注册会把 error 翻回 ok（判定粘性回归）', async () => {
+    const flipped = await waitFor(
+      async () => {
+        const get = await request(base, 'GET')
+        return get.data.status.slow?.state === 'ok' ? get.data.status.slow : undefined
+      },
+      { label: '晚到的工具注册把 error 翻成 ok', timeout: 20000 },
+    )
+    assert.equal(flipped.message, '')
+    assert.equal(flipped.detail, false)
+  })
+
+  it('普通工具错误原样上抛，绝不触发重挂（不误伤业务错误）', async () => {
+    harness.tools.register({
+      name: 'mcp__slow__plain',
+      execute: async () => {
+        throw new Error('tool call timeout after 60000ms')
+      },
+    })
+    const definition = harness.tools.defs.get('mcp__slow__plain')
+    await assert.rejects(() => definition.execute({}), /tool call timeout/)
+    const get = await request(base, 'GET')
+    assert.equal(get.data.status.slow.state, 'ok', '业务错误不该把服务器状态改成别的')
+  })
+
+  it('会话失效：抛可照做的一句，并把实例换新（自动重新初始化）', async () => {
+    harness.tools.register({
+      name: 'mcp__slow__boom',
+      execute: async () => {
+        throw new Error('Error POSTing to endpoint: session not found')
+      },
+    })
+    const definition = harness.tools.defs.get('mcp__slow__boom')
+    await assert.rejects(
+      () => definition.execute({}),
+      /服务器 "slow" 的 MCP 会话已失效，已自动重新初始化，请重试本次调用/,
+    )
+    // 重挂进行中：卡片要立刻呈现「正在重新初始化」，而不是继续显示 ok。
+    const during = await request(base, 'GET')
+    assert.equal(during.data.status.slow.state, 'connecting')
+    assert.match(during.data.status.slow.message, /正在重新初始化/)
+    // 重挂完成后工具回来、状态回 ok。
+    const settled = await waitFor(
+      async () => {
+        const get = await request(base, 'GET')
+        return get.data.status.slow?.state === 'ok' ? get.data.status.slow : undefined
+      },
+      { label: '重挂后回到 ok', timeout: 20000 },
+    )
+    assert.equal(settled.message, '')
+    assert.ok(
+      await waitFor(() => harness.tools.defs.has('mcp__slow__late'), { label: '重挂后工具重新注册', timeout: 20000 }),
+    )
+  })
+
+  it('超出限流后不再重挂，但改抛人工提示（不会无限重启服务）', async () => {
+    // 连打 4 次：限流是 5 分钟 3 次，第 4 次必须走「已达上限」分支。
+    const messages = []
+    for (let index = 0; index < 4; index += 1) {
+      const name = `mcp__slow__boom${index}`
+      harness.tools.register({
+        name,
+        execute: async () => {
+          throw new Error('session not found')
+        },
+      })
+      try {
+        await harness.tools.defs.get(name).execute({})
+        assert.fail('应当抛出会话失效的提示')
+      } catch (error) {
+        messages.push(error.message)
+      }
+      // 让上一次重挂收尾，避免都撞在 recovering 上（那也会返回 false，但语义不同）。
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    assert.equal(messages.length, 4)
+    assert.ok(
+      messages.some((message) => /已达上限/.test(message)),
+      `限流必须最终转人工提示，实际：${JSON.stringify(messages)}`,
+    )
+    assert.ok(
+      messages.some((message) => /已自动重新初始化/.test(message)),
+      `限流前的重挂仍应照常提示，实际：${JSON.stringify(messages)}`,
+    )
+  })
+})

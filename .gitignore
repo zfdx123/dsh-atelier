@@ -7,5 +7,7 @@ dist/
 *.log
 审计报告/
 compat-artifacts/
+# 兼容性核对的临时工作区（隔离 DSH_HOME、0.2.0-rc.1 依赖树、探针脚本）
+.compat/
 .DS_Store
 Thumbs.db

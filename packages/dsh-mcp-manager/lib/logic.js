@@ -389,6 +389,115 @@ export function mergeMountStatus(previous, update) {
   }
 }
 
+// ── MCP 会话失效（session not found）────────────────────────────────────
+//
+// 上游 SDK 的 `_send` 对非 2xx 直接 throw（正文就是 `session not found` 这 18 个
+// 字节），同时只调 transport.onerror；dsh-mcp-client 只挂 generation.onclose，
+// **没有任何会话重置/重初始化逻辑**——重连只在 connect / 工具同步失败时触发，
+// 而工具调用失败既不重连也不打日志。于是服务端一重启（session 回收），客户端
+// 就一直拿着死 session id 发请求，之后每次调用都失败，直到手动重挂。
+//
+// 所以这里做两件事：①识别「会话失效」这一类错误；②限流地重挂那一台。
+
+/**
+ * 会话失效的文案特征。
+ *
+ * 不依赖 SDK 内部枚举（拿不到，也不稳定）：只认**正文里带 session 的这几种说法**。
+ * 三条都实测过或来自上游实现：
+ *   - `Error POSTing to endpoint: session not found`（实测，服务端重启后 404 正文）
+ *   - `session expired` / `invalid session`（同类实现的其他措辞）
+ *   - `method "tools/list" is invalid during session initialization`（实测，缺 session 头）
+ * @type {RegExp[]}
+ */
+export const MCP_SESSION_INVALID_PATTERNS = [
+  /session not found/i,
+  /session\s+(?:has\s+)?expired/i,
+  /invalid\s+session/i,
+  /invalid during session initialization/i,
+]
+
+/**
+ * 把错误对象摊平成可搜索的文本：message + 整条 cause 链 + 状态码/错误码。
+ *
+ * SDK 把真正的正文包在 message 里（`Error POSTing to endpoint: session not found`），
+ * 而工具层常常再包一层（cause 链）。只读 message 会漏，只读 cause 也会漏。
+ * @param {unknown} error
+ * @returns {string}
+ */
+export function describeErrorText(error) {
+  const parts = []
+  const seen = new Set()
+  let current = error
+  for (let depth = 0; depth < 8 && current !== null && current !== undefined; depth += 1) {
+    if (typeof current === 'object') {
+      if (seen.has(current)) break
+      seen.add(current)
+    }
+    if (typeof current === 'string') {
+      parts.push(current)
+      break
+    }
+    if (typeof current !== 'object') {
+      parts.push(String(current))
+      break
+    }
+    if (typeof current.message === 'string') parts.push(current.message)
+    for (const key of ['status', 'statusCode', 'code']) {
+      const value = current[key]
+      if (typeof value === 'string' || typeof value === 'number') parts.push(String(value))
+    }
+    current = current.cause
+  }
+  return parts.join(' | ')
+}
+
+/**
+ * 这个错误是不是「MCP 会话失效」（服务端把会话回收了，重新初始化才能恢复）。
+ *
+ * 判据只有一条：错误文本里出现了会话失效的措辞。**不做宽松匹配**——工具调用
+ * 本身失败（参数错、超时、服务端 500）绝不能触发重挂，那是把用户的服务器重启
+ * 一遍去掩盖一个业务错误。因此也要求文本里确实有 session 这个词。
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function isSessionInvalidError(error) {
+  const text = describeErrorText(error)
+  if (text === '') return false
+  return MCP_SESSION_INVALID_PATTERNS.some((pattern) => pattern.test(text))
+}
+
+/** 会话失效后重新初始化时，写进挂载状态的主文案（用户/模型都能照做）。 */
+export const SESSION_RECOVERING_MESSAGE = '会话已失效（服务器重启或回收了会话），正在重新初始化…'
+
+/**
+ * 抛给模型的那句话：说清「已自动重新初始化，请重试本次调用」。
+ *
+ * 不透明重放第一次调用是有意的：SDK 层拿不到新实例的 definition，而且第一次
+ * 调用确实没执行成功（404 早于执行），所以重试是安全的——但必须由发起方重试。
+ * @param {string} serverName
+ * @param {boolean} recovered 是否真的已经发起重挂（false = 超出限流，需人工）
+ * @param {number} limit 限流窗口内允许的次数
+ * @returns {string}
+ */
+export function sessionInvalidMessage(serverName, recovered, limit = 3) {
+  return recovered
+    ? `服务器 "${serverName}" 的 MCP 会话已失效，已自动重新初始化，请重试本次调用。`
+    : `服务器 "${serverName}" 的 MCP 会话已失效，且自动重新初始化已达上限（${limit} 次），请在设置页把它「关闭」再「开启」，或重启 Host。`
+}
+
+/**
+ * 限流判定：滑动窗口内最多 limit 次。
+ * @param {number[]} history 既往重挂时间戳（毫秒）
+ * @param {number} now
+ * @param {{limit?: number, windowMs?: number}} [options]
+ * @returns {boolean} 允许再重挂一次
+ */
+export function recoveryAllowed(history, now, { limit = 3, windowMs = 300000 } = {}) {
+  if (!Array.isArray(history)) return true
+  const recent = history.filter((at) => Number.isFinite(at) && now - at < windowMs)
+  return recent.length < limit
+}
+
 // ── 密钥引用 ────────────────────────────────────────────────────────────
 //
 // env / headers 的「值」可以写成引用，避免密钥明文落盘 settings.yaml：

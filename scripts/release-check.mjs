@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const packagesDir = path.join(root, 'packages')
 /** The plugins release in lockstep. */
-const PLUGIN_VERSION = '1.0.9'
+const PLUGIN_VERSION = '1.0.10'
 /**
  * The aggregator versions on its own: it only carries the bundle composition, so
  * changing which plugins are in the set must not force a republish of plugins
@@ -24,6 +24,30 @@ const PLUGIN_VERSION = '1.0.9'
  */
 const AGGREGATOR = 'dsh-atelier'
 const EXCLUDED = new Set(['dsh-opencode-go'])
+/**
+ * 声明支持的 DSH 运行时，**逐条显式**列出。
+ *
+ * 为什么不写成一条 caret：caret 在带 prerelease 时上界是 `<X.Y.Z-0`，所以
+ * `^0.1.7-rc.2` 恰好挡掉 `0.2.0-rc.1`（`0.2.0-rc.1 > 0.2.0-0`：数字标识符小于字母数字
+ * 标识符）。而 DSH 0.2.0-rc.1 的 `dsh plugin add` 会用
+ * `semver.satisfies(runtimeVersion, peerRange, { includePrerelease: true })` 逐个检查
+ * `@deepseek-ai/dsh*` 的 peer 范围，不满足就**直接拒绝安装**——peer 范围写错不是文档
+ * 问题，是装不装得上的问题。
+ *
+ * 这里不重实现 semver：只强制「每个受支持的运行时都有一条显式 caret」，把范围漂移变成
+ * 一次刻意修改。真正的 satisfies 判定由 DSH 自己的闸门与隔离 profile 实装核对负责。
+ */
+const SUPPORTED_DSH = ['^0.1.7-rc.2', '^0.2.0-rc.1']
+/** 把 `a || b` 拆成排序去重后的集合，用于比较。 */
+const rangeAlternatives = (range) => [
+  ...new Set(
+    String(range)
+      .split('||')
+      .map((part) => part.trim())
+      .filter((part) => part !== ''),
+  ),
+].sort()
+const SORTED_SUPPORTED_DSH = [...SUPPORTED_DSH].sort().join(' | ')
 /**
  * A lockfile must resolve from the registry these packages publish to.
  *
@@ -105,6 +129,23 @@ for (const name of dirs) {
   if (j.engines?.dsh === undefined) fail(name, 'has no engines.dsh')
   const peers = Object.keys(j.peerDependencies ?? {})
   if (!peers.includes('@deepseek-ai/cordis')) fail(name, 'does not declare the @deepseek-ai/cordis peer')
+
+  // 每个受支持的 DSH 运行时都必须有一条显式的 caret；DSH 0.2.0-rc.1 的安装期 peer
+  // 兼容性闸门会按这条范围决定「能不能装」（见 SUPPORTED_DSH 的说明）。
+  const dshRanges = [['engines.dsh', j.engines?.dsh]]
+  for (const [dep, range] of Object.entries(j.peerDependencies ?? {})) {
+    if (/^@deepseek-ai\/dsh(-|$)/.test(dep)) dshRanges.push([`peerDependencies.${dep}`, range])
+  }
+  for (const [field, range] of dshRanges) {
+    const alternatives = rangeAlternatives(range ?? '')
+    if (alternatives.join(' | ') !== SORTED_SUPPORTED_DSH) {
+      fail(
+        name,
+        `${field} is "${range}" — must list every supported DSH runtime explicitly (${SORTED_SUPPORTED_DSH}); ` +
+          '一条 caret 收不下不同元组的 prerelease（caret 的 prerelease 上界是 <X.Y.Z-0）',
+      )
+    }
+  }
 
   // copy
   if (!/[\u4e00-\u9fff]/.test(j.description ?? '')) fail(name, 'description is not Chinese')
