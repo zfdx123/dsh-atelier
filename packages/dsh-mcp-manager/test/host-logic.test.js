@@ -490,34 +490,47 @@ describe('mcpClientLogToStatus（mcp-client 日志 → 挂载状态）', () => {
     assert.equal(reg.detail, true)
   })
 
-  it('无法确认关闭：新旧两种上游措辞都要识别（0.1.6-alpha.1 改写过的文案）', () => {
-    // 旧措辞 0.1.0-rc.8 lib/index.js:655；新措辞 0.1.6-alpha.1 lib/index.js:539。
-    // 两者都是终态（不再重连），必须在设置页上呈现为 error。
-    for (const text of [
-      'failed generation did not close within 5000ms — reconnect stopped to avoid overlapping server processes; reload the plugin or restart the Host to retry',
-      'failed generation could not confirm transport closure — reconnect stopped to avoid overlapping server processes; reload the plugin or restart the Host to retry',
-    ]) {
-      const update = mcpClientLogToStatus(log([`mcp-client(a): ${text}`]))
-      assert.equal(update.state, 'error', text)
-      assert.match(update.message, /停止重连/, text)
-    }
+  it('无法确认关闭（终态）→ 翻译成「停止重连」', () => {
+    // 0.1.7-rc.2 与 0.2.0-rc.1 的 mcp-client 源码逐字节相同，这条是唯一措辞。
+    // 更早的 rc.8 措辞已不在受支持范围内（见下一条测试）。
+    const update = mcpClientLogToStatus(
+      log([
+        'mcp-client(a): failed generation could not confirm transport closure — reconnect stopped to avoid overlapping server processes; reload the plugin or restart the Host to retry',
+      ]),
+    )
+    assert.equal(update.state, 'error')
+    assert.match(update.message, /停止重连/)
+    assert.equal(update.detail, false)
   })
 
-  it('拆卸期关闭未确认 → 也给出可读错误（两种上游措辞都要认）', () => {
+  it('已移除的旧措辞（rc.8）仍然报错：落到未识别透传，绝不变回「看起来正常」', () => {
     for (const text of [
-      // rc.8 lib/index.js:692
+      // 0.1.0-rc.8 lib/index.js:655：同一事件的旧措辞，已不在受支持范围
+      'failed generation did not close within 5000ms — reconnect stopped to avoid overlapping server processes; reload the plugin or restart the Host to retry',
+      // 0.1.0-rc.8 lib/index.js:692：拆卸期旧措辞
       'generation did not close within 5000ms during disposal — server shutdown may be incomplete',
-      // 0.1.6-alpha.1 lib/index.js:483（同一事件被改写）
-      'transport closure could not be confirmed during disposal — server shutdown may be incomplete',
     ]) {
       const update = mcpClientLogToStatus(log([`mcp-client(a): ${text}`], 'mcp-client', 'error'))
       assert.equal(update.state, 'error', text)
       assert.equal(update.detail, true, text)
-      assert.ok(
-        !update.message.startsWith('未识别的 mcp-client 日志'),
-        `应被规则翻译而不是落到透传兜底：${update.message}`,
-      )
+      assert.match(update.message, /未识别的 mcp-client 日志/, text)
     }
+  })
+
+  it('拆卸期关闭未确认 → 给出可读错误', () => {
+    const update = mcpClientLogToStatus(
+      log(
+        ['mcp-client(a): transport closure could not be confirmed during disposal — server shutdown may be incomplete'],
+        'mcp-client',
+        'error',
+      ),
+    )
+    assert.equal(update.state, 'error')
+    assert.equal(update.detail, true)
+    assert.ok(
+      !update.message.startsWith('未识别的 mcp-client 日志'),
+      `应被规则翻译而不是落到透传兜底：${update.message}`,
+    )
   })
 
   it('未识别的 error/warn 透传原文，绝不静默丢弃（上游再改词也不会变成「已挂载」）', () => {

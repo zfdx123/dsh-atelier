@@ -302,11 +302,14 @@ export const MCP_LOG_RULES = [
     }),
   },
   {
-    // 同一事件的两种上游措辞：rc.8 `did not close within <ms>ms`、
-    // 0.1.6-alpha.1 `could not confirm transport closure`。两者都是终态
-    // （settleFailedGeneration 直接 return，不再 scheduleReconnect）。
+    // 终态：settleFailedGeneration 直接 return，不再 scheduleReconnect。
+    //
+    // 只认现行措辞。0.1.7-rc.2 与 0.2.0-rc.1 的 mcp-client 源码**逐字节相同**，
+    // 都是 `could not confirm transport closure`；更早的 rc.8 措辞
+    // （`did not close within <ms>ms`）已不在受支持范围内，交给下面的未识别透传
+    // 兜底——那同样会报成 error 并带上原文，不会变成「看起来正常」。
     name: '世代未确认关闭（终态）',
-    match: (content) => /^failed generation (?:did not close within|could not confirm transport closure)/.test(content),
+    match: (content) => /^failed generation could not confirm transport closure/.test(content),
     build: () => ({
       state: 'error',
       message: '连接关闭未能确认，已停止重连：需重载插件或重启 Host 才能恢复',
@@ -314,13 +317,9 @@ export const MCP_LOG_RULES = [
     }),
   },
   {
-    // 拆卸期没确认关闭：rc.8 `generation did not close within <ms>ms during disposal`、
-    // 0.1.6-alpha.1 `transport closure could not be confirmed during disposal`
-    // ——同一事件被改写，两种措辞都认。
+    // 拆卸期没确认关闭。同上：只认现行措辞。
     name: '拆卸期关闭未确认',
-    match: (content) =>
-      /during disposal/.test(content) &&
-      /(?:generation did not close within|transport closure could not be confirmed)/.test(content),
+    match: (content) => /during disposal/.test(content) && /transport closure could not be confirmed/.test(content),
     build: () => ({ state: 'error', message: '服务进程未在超时内退出（拆卸期）：可能留下残留进程', detail: true }),
   },
 ]

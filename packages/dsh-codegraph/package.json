@@ -25,13 +25,13 @@
   ],
   "engines": {
     "node": ">=22",
-    "dsh": "^0.1.7-rc.2 || ^0.2.0-rc.1"
+    "dsh": "^0.2.0-rc.1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-llm": "^0.1.7-rc.2 || ^0.2.0-rc.1",
-    "@deepseek-ai/dsh-system-prompt": "^0.1.7-rc.2 || ^0.2.0-rc.1",
-    "@deepseek-ai/dsh-tools": "^0.1.7-rc.2 || ^0.2.0-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.1",
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "peerDependenciesMeta": {
@@ -43,8 +43,8 @@
     "@colbymchenry/codegraph": "^1.6.0"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-llm": "^0.1.7-rc.2",
-    "@deepseek-ai/dsh-tools": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.2.0-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.1",
     "@deepseek-ai/schemastery": "^3.18.4"
   },
   "scripts": {

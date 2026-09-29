@@ -37,7 +37,7 @@ const EXCLUDED = new Set(['dsh-opencode-go'])
  * 这里不重实现 semver：只强制「每个受支持的运行时都有一条显式 caret」，把范围漂移变成
  * 一次刻意修改。真正的 satisfies 判定由 DSH 自己的闸门与隔离 profile 实装核对负责。
  */
-const SUPPORTED_DSH = ['^0.1.7-rc.2', '^0.2.0-rc.1']
+const SUPPORTED_DSH = ['^0.2.0-rc.1']
 /** 把 `a || b` 拆成排序去重后的集合，用于比较。 */
 const rangeAlternatives = (range) => [
   ...new Set(

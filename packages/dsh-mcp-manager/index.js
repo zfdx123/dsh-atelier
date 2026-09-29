@@ -619,19 +619,15 @@ export function apply(ctx, config) {
     },
   })
 
-  // 0.1.7 的配置变化通知：volatile 节点被就地改写后，Loader 发出
+  // 配置变化通知：volatile 节点被就地改写后，Loader 发出
   // `loader/volatile-update`（只送到本 fiber 自己的监听器）。路径是相对根
   // 的键路径数组，`[]` 表示根节点本身就是 volatile 节点。
   //
-  // 旧版的 `settings/updated` 事件在 0.1.7 已不存在；这里两条都听，配置一变
-  // 就按差异对齐实例（去抖合并），在哪个版本上都只需这一处。
+  // 更早的 `settings/updated` 事件（0.1.6 及以前的契约，那时 `ns` 还是插件自取
+  // 的命名空间）已删除：`dsh-settings` 在 0.1.7-rc.2 与 0.2.0-rc.1 之间**逐字节
+  // 相同**，两版都没有这个事件，留着它只服务我们已不声明的版本。
   const onConfigChanged = () => scheduleSync(readServers())
   ctx.on('loader/volatile-update', onConfigChanged)
-  ctx.on('settings/updated', (ns, next) => {
-    // 认领前不知道自己的名字，所以未认领时一律接受（`mcp` 是历史别名）。
-    if (claimedNs !== null && ns !== claimedNs && ns !== 'mcp') return
-    scheduleSync(Array.isArray(next?.servers) ? next.servers : readServers())
-  })
 
   // 工具注册观察器必须在第一次挂载**之前**装好：那才是「确实连上了」的正向信号。
   observeToolRegistration()

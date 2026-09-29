@@ -159,7 +159,7 @@ codegraph 的官方 MCP server 在工作区**未建立索引时暴露 0 个工�
 
 ## 前置要求
 
-1. **DSH**：`^0.1.7-rc.2 || ^0.2.0-rc.1`（声明在 `engines.dsh` 与 `peerDependencies`；见「兼容性」）。
+1. **DSH**：`^0.2.0-rc.1`（声明在 `engines.dsh` 与 `peerDependencies`；见「兼容性」）。
 2. **Node.js**：`>= 22`（本包 `engines.node`）。
 3. **一个可用的 bash/subprocess 执行器**（例如 `dsh-bash-local`）：插件优先用 `subprocess` 服务（argv 直传，
    无引号风险），退回 `shell` 服务；两者都在每次调用时惰性解析，挂载顺序不影响启动。
@@ -226,8 +226,10 @@ codegraph 的官方 MCP server 在工作区**未建立索引时暴露 0 个工�
 | `@colbymchenry/codegraph` CLI | **`1.6.0`**（本包依赖声明 `^1.6.0`，测试套件实测通过；`1.5.0` 亦曾把 13 个子命令与参数逐一核对） |
 | Node.js | ≥ 22 |
 
-> `peerDependencies` 与 `engines.dsh` 写的是 `^0.1.7-rc.2 || ^0.2.0-rc.1`。两条 caret 缺一不可，
-> 原因是 semver 对 prerelease 的两条规则叠加（实测 semver 7.8.5）：
+> `peerDependencies` 与 `engines.dsh` 写的是 `^0.2.0-rc.1`（1.0.10 起**只声明并验证这一版**；
+> `0.1.7-rc.2` 及更早的 `0.1.6-alpha.*` / `0.1.5-*` 都只是上表里的历史校对记录，不再被范围接纳）。
+> 想同时支持两版就得写成 `^0.1.7-rc.2 || ^0.2.0-rc.1`——**两条 caret 缺一不可**，原因是 semver
+> 对 prerelease 的两条规则叠加（实测 semver 7.8.5）：
 >
 > 1. 带 prerelease 标签的版本，只能被**元组相同**的比较器接纳——所以 `^0.1.7-rc.2` 收下
 >    `0.1.7-rc.2` / `0.1.7-rc.3` / `0.1.7` / `0.1.8`，但**不收** `0.2.0-rc.1`。
@@ -235,9 +237,7 @@ codegraph 的官方 MCP server 在工作区**未建立索引时暴露 0 个工�
 >    prerelease 排除在外）。而 `0.2.0-rc.1 > 0.2.0-0`（数字标识符 `0` 小于字母数字标识符
 >    `rc`），于是恰好被挡在门外。`0.2.0-rc.1` 必须由**它自己那条** caret 接纳。
 >
-> `0.1.6-alpha.*` 与 `0.1.5-*` 已不在声明范围内（上方表里列出的是**校对过**的版本，不等于
-> 仍被 peer 范围接纳）。也别写 `-0` 后缀去「放宽上界」（如 `>=0.1.7-rc.2-0`）——实测它连
-> `0.1.7-rc.2` 本身都不接纳。
+> 也别写 `-0` 后缀去「放宽上界」（如 `>=0.1.7-rc.2-0`）——实测它连 `0.1.7-rc.2` 本身都不接纳。
 >
 > **`0.2.0-rc.1` 起还有一道安装期闸门**：`dsh plugin add` 会用
 > `semver.satisfies(runtimeVersion, peerRange, { includePrerelease: true })` 逐个检查

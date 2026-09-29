@@ -201,9 +201,9 @@ mcp:
 | 组件 | 版本要求 |
 |---|---|
 | Node | **`^22.19.0 \|\| >=24.0.0`**（`undici` 8.x 的下限是 22.19.0；`@deepseek-ai/dsh-mcp-client` 依赖 `Promise.withResolvers`） |
-| DSH | **`^0.1.7-rc.2 || ^0.2.0-rc.1`**（`engines.dsh` 与 peer 范围；本包在 1.0.5 那一版按 `0.1.7-rc.2` 的设置 API 重写过，1.0.10 起同时声明并核对 `0.2.0-rc.1`。`0.1.5` / `0.1.6-alpha.*` 系列是更早的校对记录，已不在声明范围内） |
-| `@deepseek-ai/dsh-mcp-client` | `^0.1.7-rc.2 || ^0.2.0-rc.1`（peerDependency，由运行时提供；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
-| `@deepseek-ai/dsh-settings` | `^0.1.7-rc.2 || ^0.2.0-rc.1`（peerDependency，可选：`ctx.settings` 由宿主提供） |
+| DSH | **`^0.2.0-rc.1`**（`engines.dsh` 与 peer 范围。本包在 1.0.5 那一版按 `0.1.7-rc.2` 的设置 API 重写过；**1.0.10 起只声明并验证 `0.2.0-rc.1`**，`0.1.7-rc.2` 与更早的 `0.1.5` / `0.1.6-alpha.*` 都只是历史校对记录） |
+| `@deepseek-ai/dsh-mcp-client` | `^0.2.0-rc.1`（peerDependency，由运行时提供；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
+| `@deepseek-ai/dsh-settings` | `^0.2.0-rc.1`（peerDependency，可选：`ctx.settings` 由宿主提供） |
 | `@deepseek-ai/cordis` | `^4.0.4`（peerDependency） |
 | `dsh` CLI + pnpm | `dsh plugin` 命令转发给 pnpm；本包按 profile 的 pnpm 布局安装 |
 
@@ -211,7 +211,7 @@ mcp:
 
 ## 已知限制
 
-- **日志文案契约是「软」的**：设置页的真实挂载状态靠截获 mcp-client 的日志文案驱动，规则表以「前缀 + 关键词」为键。上游一旦改写文案，翻译就会落空、状态显示失真（历史上就发生过：`failed generation did not close within …` 被改写成 `failed generation could not confirm transport closure …`，导致「永久停止重连」的终态仍显示「已挂载」）。现在有四道防线：规则覆盖新旧措辞、**未识别的 error/warn 一律透传原文**（未知 ≠ 看起来正常）、`test/log-contract.test.js` 扫描上游源码文案（改词即变红）、**确认窗口**——挂载后没有正向证据就不亮绿，所以文案漂移最多让状态停在「连接中 / 未确认」，不会退回「乐观的已挂载」。
+- **日志文案契约是「软」的**：设置页的真实挂载状态靠截获 mcp-client 的日志文案驱动，规则表以「前缀 + 关键词」为键。上游一旦改写文案，翻译就会落空、状态显示失真（历史上就发生过：`failed generation did not close within …` 被改写成 `failed generation could not confirm transport closure …`，导致「永久停止重连」的终态仍显示「已挂载」）。现在有三道防线：**未识别的 error/warn 一律透传原文**（未知 ≠ 看起来正常）、`test/log-contract.test.js` 扫描上游源码文案（改词即变红）、**确认窗口**——挂载后没有正向证据就不亮绿，所以文案漂移最多让状态停在「连接中 / 未确认」，不会退回「乐观的已挂载」。（1.0.10 起只声明 `0.2.0-rc.1`，规则表里就只留现行措辞了：那条更早的 rc.8 措辞已删，但它仍会走透传兜底，照旧报红带原文——见 `test/host-logic.test.js` 里那条「已移除的旧措辞仍然报错」。）
 - **确认窗口是启发式，不是握手**：它靠「工具注册」这一个正向信号 + 超时兜底。**一台连得上但确实没有工具的 MCP 服务器会在窗口结束后被标成「未确认连上」**（它没连上的样子与没回应无法区分，因为上游成功时不打日志）。若上游哪天补上一条连接成功的日志，规则表加一条即可把这种情况收干净。
 - **`state: 'connecting'` 是新增的第四种状态**：外壳没有 warning 态令牌，所以它画成中性灰点 + outline 标签；老版本客户端拿到未知状态会显示「已挂载」，升级客户端后才是「连接中」。
 - **`ns` → `namespace` 风险**：修订号（乐观锁）依赖 `settings` 描述符的 `ns` 字段，而 `dsh-settings` 的 README 已把 `ns`→`namespace` 列为 TODO。字段一旦改名，`currentRev()` 会退回 0，表现为**设置页每次保存都 409「已被其他窗口/页面修改」，保存链路整体不可用**。现在用 `settings/document-updated (ns, revision)` 的推送值兜底（事件参数是位置参数，不受字段改名影响），但这条依赖仍在。
@@ -257,39 +257,40 @@ mcp:
   MCP_LOG_CONTRACT_PRINT=1 node test/log-contract.test.js
   ```
 
-  同时把 `devDependencies` 的 `@deepseek-ai/dsh-mcp-client` 钉在宿主当前版本（`^0.1.7-rc.2`），让本地测试与线上尽量同源；本地测试跑 0.1.7-rc.2，`0.2.0-rc.1` 的核对结果见「0.2.0-rc.1 兼容性」一节。
+  同时把 `devDependencies` 的 `@deepseek-ai/dsh-mcp-client` 钉在**我们声明的**宿主版本（`^0.2.0-rc.1`），让本地测试与线上同源——测试跑的就是受支持的版本。
 
 ### 兼容性
 
 | 组件 | 版本要求 |
 |---|---|
 | Node | **`^22.19.0 \|\| >=24.0.0`** |
-| DSH | **`0.2.0-rc.1`**（1.0.10 起声明支持；与 `0.1.7-rc.2` 共用同一条范围 `^0.1.7-rc.2 || ^0.2.0-rc.1`） |
-| `@deepseek-ai/dsh-mcp-client` | `^0.1.7-rc.2 || ^0.2.0-rc.1`（peerDependency；两个版本的本包源码逐字节相同，见下） |
-| `@deepseek-ai/dsh-settings` | `^0.1.7-rc.2 || ^0.2.0-rc.1`（peerDependency；`ctx.settings` 由宿主提供） |
+| DSH | **`0.2.0-rc.1`**（1.0.10 起只声明并验证这一版） |
+| `@deepseek-ai/dsh-mcp-client` | `^0.2.0-rc.1`（peerDependency；与 `0.1.7-rc.2` 的源码逐字节相同，见下） |
+| `@deepseek-ai/dsh-settings` | `^0.2.0-rc.1`（peerDependency；`ctx.settings` 由宿主提供） |
 | `@deepseek-ai/cordis` | `^4.0.4` |
 
-### 0.2.0-rc.1 兼容性（1.0.10 起）
+### 为什么只声明 0.2.0-rc.1
 
 `0.2.0-rc.1` 与 `0.1.7-rc.2` 之间，本包用到的一方包**源码逐字节相同**（只差
 `package.json` 的版本号）：`dsh-mcp-client`、`dsh-settings`、`dsh-tools`、`dsh-llm`、
 `dsh-session`（仅新增导出 `ToolCallRecovery`）、`dsh-client-ui-primitives`（仅新增
-`pointerModality`）与 `dsh-util-values` 的公共面都是向后兼容的增量。真正的障碍是**声明**：
+`pointerModality`）与 `dsh-util-values` 的公共面都是向后兼容的增量。但**声明**上只能二选一：
 
 - `0.2.0-rc.1` 的 `dsh plugin add` 会做安装期 peer 兼容性闸门。用
   `semver.satisfies('0.2.0-rc.1', '^0.1.7-rc.2', { includePrerelease: true })` 判定为
   **不兼容**（caret 在带 prerelease 时上界是 `<0.2.0-0`，而 `0.2.0-rc.1 > 0.2.0-0`），
-  于是安装被直接拒绝：`Plugin … is incompatible with dsh 0.2.0-rc.1`。所以范围必须显式
-  带上 `^0.2.0-rc.1`——这不是文档问题，是**装不装得上**的问题。
+  于是安装被直接拒绝：`Plugin … is incompatible with dsh 0.2.0-rc.1`。想同时支持两版就得写
+  `^0.1.7-rc.2 || ^0.2.0-rc.1`（两条 caret 缺一不可）；1.0.10 选择只声明真正验证过的
+  `0.2.0-rc.1`，把范围收窄成一条。
 - 宿主的根 Include 会把裸包名（非 `.`/`cordis:` 开头）用**宿主自己的安装位置**解析
   （`dsh-app-boot` 的 `HostResolvedRootInclude`），所以插件运行时拿到的始终是宿主的
   `dsh-*` 副本。peer 范围因此纯粹是**兼容性契约**，写宽写窄直接决定能不能装、以及在哪个
   版本上被验证过。
 
-核对方式（可复现）：把本包源码复制一份、只改 `engines.dsh` 与 peer 范围，用隔离的
-`DSH_HOME` 装进 `0.2.0-rc.1` 的 web profile，7 个包全部安装成功、`--dump-config` 里 7 行
-齐备、真启动到 `dsh web: http://127.0.0.1:<port>/` 且无插件装载报错；同一份代码在
-`0.2.0-rc.1` 依赖下跑完本包全部单测与 E2E。
+核对方式（可复现）：用隔离的 `DSH_HOME` 把本包（`file:` 规格，即工作区源码）装进
+`0.2.0-rc.1` 的 web profile，7 个包全部安装成功、`--dump-config` 里 7 行齐备、真启动到
+`dsh web: http://127.0.0.1:<port>/` 且无插件装载报错；本包的 `devDependencies` 也已钉在
+`0.2.0-rc.1`，所以 `npm test` 跑的就是受支持的那一版（含全部单测与 E2E）。
 
 ### 历史修复记录（当前版本 1.0.10）
 

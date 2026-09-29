@@ -2,7 +2,7 @@
 // 极简 stdio MCP 服务器（fixtures/fake-mcp-server.mjs，放 test/ 外以免被
 // node --test 默认发现规则当作测试文件执行），走真实 HTTP 接口验证
 // 「配置保存即生效」全链路：
-//   POST /api/mcp/servers → settings 提交 → settings/updated → 挂载
+//   POST /api/mcp/servers → settings 提交 → loader/volatile-update → 挂载
 //   mcp-client → 连接假服务器 → ctx.tools 注册 mcp__\<名称\>__\<工具\>。
 // 同时覆盖：真实挂载状态跟踪（日志截获）、rev 乐观锁（409）、enabled 开关、
 // 密钥引用保留、failOnStartupError、toolCallTimeoutMs 自定义。
