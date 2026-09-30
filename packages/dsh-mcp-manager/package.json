@@ -1,6 +1,6 @@
 {
   "name": "@zfdx123/dsh-mcp-manager",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "MCP 服务器管理器：在 DSH 设置页配置 MCP 服务器，宿主侧按配置热挂载/卸载 mcp-client 实例（支持内网自签名证书）",
   "license": "MIT",
   "author": "zfdx123 <2915441170@qq.com>",
@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-mcp-client": "^0.2.0-rc.1"
+    "@deepseek-ai/dsh-mcp-client": "^0.2.0-rc.2"
   },
   "scripts": {
     "test": "node --test",

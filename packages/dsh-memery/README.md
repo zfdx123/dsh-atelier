@@ -131,7 +131,7 @@ dsh plugin --profile web add @zfdx123/dsh-memery
    memory_* 工具 / 设置页路由 ────┘
 ```
 
-集成点（均按 DSH `^0.2.0-rc.1` 的运行时契约核实；更早的 0.1.5-rc.1 是历史基线）：
+集成点（均按 DSH `^0.2.0-rc.1` 的运行时契约核实，`0.2.0-rc.1` / `0.2.0-rc.2` 两版都实测过；更早的 0.1.5-rc.1 是历史基线）：
 
 - `ctx.tools.register(ToolDefinition)` —— 六个 `memory_*` 工具；
 - `ctx.on('agent/pre-step', …)` —— waterfall，把快照/命中拼进 `decision.messages`、插到真实用户消息之前；

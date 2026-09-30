@@ -28,7 +28,7 @@ dsh plugin --profile web add @zfdx123/dsh-memery
 
 ## 前置要求
 
-- DSH `^0.2.0-rc.1`（各包的 `engines.dsh` 与 peer 范围都声明这一条。`0.1.7-rc.2` 是历史基线：`0.2.0-rc.1` 的 `dsh plugin add` 会做安装期 peer 兼容性闸门，而一条 caret 收不下跨元组的 prerelease——caret 带 prerelease 时上界是 `<X.Y.Z-0`，所以 `^0.1.7-rc.2` 恰好挡掉 `0.2.0-rc.1`）
+- DSH `^0.2.0-rc.1`（各包的 `engines.dsh` 与 peer 范围都声明这一条；它同时收下 `0.2.0-rc.1`、`0.2.0-rc.2` 与后续 0.2.x——同一 major.minor.patch 元组内的 prerelease 都在范围里，两版均已实测）。`0.1.7-rc.2` 是历史基线：`0.2.0-rc.1` 起 `dsh plugin add` 会做安装期 peer 兼容性闸门，而一条 caret 收不下**跨元组**的 prerelease——caret 带 prerelease 时上界是 `<X.Y.Z-0`，所以 `^0.1.7-rc.2` 恰好挡掉 `0.2.0-rc.1`
 - Node `^22.19.0 || >=24.0.0`（`dsh-codegraph` / `dsh-skills-manager` 为 `>=22`，`dsh-memery` 为 `>=22.13`）
 - 客户端界面用外壳自带的原生组件（`@deepseek-ai/dsh-client-ui-primitives`）；拿不到时逐处降级，不会白屏
 - peer `@deepseek-ai/cordis ^4.0.4`

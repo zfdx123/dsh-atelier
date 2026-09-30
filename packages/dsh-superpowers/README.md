@@ -1,6 +1,6 @@
 # @zfdx123/dsh-superpowers
 
-把 [obra/superpowers](https://github.com/obra/superpowers) 的软件开发方法论接进 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：在 `ctx.skills` 上注册 15 个技能（需求澄清、任务规划、TDD、系统化调试、代码审查、会话诊断等），并把 `using-superpowers` 引导语作为系统提示词段落注入，让它从第一条请求起就生效、在上下文压缩后依然存在。技能是**运行时注册**的、不落盘，所以既不往 `~/.dsh/skills` 复制任何文件，也不要求改动预设或 profile 里的技能目录。当前版本 1.0.10，面向 DSH `^0.2.0-rc.1`。
+把 [obra/superpowers](https://github.com/obra/superpowers) 的软件开发方法论接进 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：在 `ctx.skills` 上注册 15 个技能（需求澄清、任务规划、TDD、系统化调试、代码审查、会话诊断等），并把 `using-superpowers` 引导语作为系统提示词段落注入，让它从第一条请求起就生效、在上下文压缩后依然存在。技能是**运行时注册**的、不落盘，所以既不往 `~/.dsh/skills` 复制任何文件，也不要求改动预设或 profile 里的技能目录。当前版本 1.0.11，面向 DSH `^0.2.0-rc.1`（`0.2.0-rc.1` 与 `0.2.0-rc.2` 均已实测）。
 
 ## 安装
 
