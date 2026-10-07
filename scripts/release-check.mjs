@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const packagesDir = path.join(root, 'packages')
 /** The plugins release in lockstep. */
-const PLUGIN_VERSION = '1.0.11'
+const PLUGIN_VERSION = '1.0.12'
 /**
  * The aggregator versions on its own: it only carries the bundle composition, so
  * changing which plugins are in the set must not force a republish of plugins
@@ -25,19 +25,35 @@ const PLUGIN_VERSION = '1.0.11'
 const AGGREGATOR = 'dsh-atelier'
 const EXCLUDED = new Set(['dsh-opencode-go'])
 /**
- * 声明支持的 DSH 运行时，**逐条显式**列出。
+ * 声明支持的 DSH 运行时，**逐条显式**列出。当前只支持 `0.2.1-alpha.1`（1.0.12 起
+ * 收窄：`0.1.7-rc.2` / `0.2.0-rc.1` / `0.2.0-rc.2` 都不再被接纳）。
  *
- * 为什么不写成一条 caret：caret 在带 prerelease 时上界是 `<X.Y.Z-0`，所以
- * `^0.1.7-rc.2` 恰好挡掉 `0.2.0-rc.1`（`0.2.0-rc.1 > 0.2.0-0`：数字标识符小于字母数字
- * 标识符）。而 DSH 0.2.0-rc.1 的 `dsh plugin add` 会用
- * `semver.satisfies(runtimeVersion, peerRange, { includePrerelease: true })` 逐个检查
- * `@deepseek-ai/dsh*` 的 peer 范围，不满足就**直接拒绝安装**——peer 范围写错不是文档
- * 问题，是装不装得上的问题。
+ * caret 带 prerelease 时上界是 `<X.Y.Z-0`，所以跨元组的 prerelease 收不进来：
+ * `^0.2.0-rc.1` 挡掉 `0.2.1-alpha.*`（`0.2.1-alpha.1 > 0.2.1-0`，而数字标识符 `0`
+ * 小于字母数字标识符 `alpha`）。要同时支持两个元组就得写 `a || b`，两条 caret 缺一不可。
+ *
+ * 安装期闸门在 `@deepseek-ai/dsh-app-boot`（`semver.satisfies(runtimeVersion, peerRange,
+ * { includePrerelease: true })`，0.2.0-rc.2 → 0.2.1-alpha.1 逐字节未变），不满足就拒绝装。
+ * 注意 `includePrerelease: true` 会把跨元组的 prerelease 也放进来——实测
+ * `satisfies('0.2.1-alpha.1', '^0.2.0-rc.1', { includePrerelease: true }) === true`，
+ * 而**严格** semver（不带该选项，npm 解析走的路径）是 false。所以「只支持一个运行时」
+ * 靠的是这里把范围收窄成**恰好一条该运行时的 caret**，而不是指望闸门替我们挡住。
  *
  * 这里不重实现 semver：只强制「每个受支持的运行时都有一条显式 caret」，把范围漂移变成
  * 一次刻意修改。真正的 satisfies 判定由 DSH 自己的闸门与隔离 profile 实装核对负责。
  */
-const SUPPORTED_DSH = ['^0.2.0-rc.1']
+const SUPPORTED_DSH = ['^0.2.1-alpha.1']
+/**
+ * 宿主运行时提供的 cordis 版本范围，**照抄 DSH 自己的声明**。
+ *
+ * 0.2.1-alpha.1 树里每个 `@deepseek-ai/dsh-*` 包都写 `peerDependencies["@deepseek-ai/cordis"]
+ * = "~4.0.5-alpha.1"`（rc.2 时是 `~4.0.4`；cordis 自身也从 4.0.4 升到 4.0.5-alpha.1）。
+ * 我们的插件跑在宿主的 cordis 里，范围写旧了不是「宽松一点」而是**装不上**：
+ * 严格 semver 下 `^4.0.4` 不接纳 `4.0.5-alpha.1`（prerelease 只在元组相同的比较器下被接纳），
+ * `npm install` 会以 ERESOLVE 失败——实测踩过（dsh-tools@0.2.1-alpha.1 要求 ~4.0.5-alpha.1，
+ * 而我们的根声明还是 ^4.0.4）。所以这里把它钉成常量，范围漂移由闸门拦下。
+ */
+const SUPPORTED_CORDIS = '~4.0.5-alpha.1'
 /** 把 `a || b` 拆成排序去重后的集合，用于比较。 */
 const rangeAlternatives = (range) => [
   ...new Set(
@@ -129,9 +145,18 @@ for (const name of dirs) {
   if (j.engines?.dsh === undefined) fail(name, 'has no engines.dsh')
   const peers = Object.keys(j.peerDependencies ?? {})
   if (!peers.includes('@deepseek-ai/cordis')) fail(name, 'does not declare the @deepseek-ai/cordis peer')
+  // cordis 由宿主运行时提供，所以我们的范围必须**就是**宿主自己声明的那个（见 SUPPORTED_CORDIS）。
+  const cordisRange = j.peerDependencies?.['@deepseek-ai/cordis']
+  if (cordisRange !== SUPPORTED_CORDIS) {
+    fail(
+      name,
+      `peerDependencies.@deepseek-ai/cordis is "${cordisRange}" — must be "${SUPPORTED_CORDIS}" ` +
+        '(the range the supported DSH runtime itself requires; a stale caret here fails `npm install` with ERESOLVE)',
+    )
+  }
 
-  // 每个受支持的 DSH 运行时都必须有一条显式的 caret；DSH 0.2.0-rc.1 的安装期 peer
-  // 兼容性闸门会按这条范围决定「能不能装」（见 SUPPORTED_DSH 的说明）。
+  // 每个受支持的 DSH 运行时都必须有一条显式的 caret；安装期的 peer 兼容性闸门
+  // （dsh-app-boot）会按这条范围决定「能不能装」（见 SUPPORTED_DSH 的说明）。
   const dshRanges = [['engines.dsh', j.engines?.dsh]]
   for (const [dep, range] of Object.entries(j.peerDependencies ?? {})) {
     if (/^@deepseek-ai\/dsh(-|$)/.test(dep)) dshRanges.push([`peerDependencies.${dep}`, range])
