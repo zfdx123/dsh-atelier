@@ -159,7 +159,7 @@ codegraph 的官方 MCP server 在工作区**未建立索引时暴露 0 个工�
 
 ## 前置要求
 
-1. **DSH**：`^0.2.1-alpha.1`（声明在 `engines.dsh` 与 `peerDependencies`；见「兼容性」）。
+1. **DSH**：`^0.2.1-alpha.2`（声明在 `engines.dsh` 与 `peerDependencies`；见「兼容性」）。
 2. **Node.js**：`>= 22`（本包 `engines.node`）。
 3. **一个可用的 bash/subprocess 执行器**（例如 `dsh-bash-local`）：插件优先用 `subprocess` 服务（argv 直传，
    无引号风险），退回 `shell` 服务；两者都在每次调用时惰性解析，挂载顺序不影响启动。
@@ -221,30 +221,31 @@ codegraph 的官方 MCP server 在工作区**未建立索引时暴露 0 个工�
 
 | 组件 | 已校对版本（历史记录，不代表当前声明范围） |
 |---|---|
-| DSH CLI | **`0.2.1-alpha.1`**（当前唯一受支持版本，已实测）；`0.1.5-rc.1`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2` 为历史校对记录 |
-| `@deepseek-ai/dsh-tools` / `dsh-llm` 等一方包 | **`0.2.1-alpha.1`**（当前唯一受支持版本，已实测）；`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2` 为历史校对记录 |
+| DSH CLI | **`0.2.1-alpha.2`**（当前唯一受支持版本，已实测）；`0.1.5-rc.1`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-alpha.1` 为历史校对记录 |
+| `@deepseek-ai/dsh-tools` / `dsh-llm` 等一方包 | **`0.2.1-alpha.2`**（当前唯一受支持版本，已实测）；`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-alpha.1` 为历史校对记录 |
 | `@colbymchenry/codegraph` CLI | **`1.6.0`**（本包依赖声明 `^1.6.0`，测试套件实测通过；`1.5.0` 亦曾把 13 个子命令与参数逐一核对） |
 | Node.js | ≥ 22 |
 
-> `peerDependencies` 与 `engines.dsh` 写的是 `^0.2.1-alpha.1`（1.0.12 起收窄到这一条，
+> `peerDependencies` 与 `engines.dsh` 写的是 `^0.2.1-alpha.2`（1.0.13 起收窄到这一条，
 > 也就是当前唯一受支持的运行时）。
-> `0.1.7-rc.2` / `0.2.0-rc.1` / `0.2.0-rc.2` 都只是上表里的历史校对记录，不再被范围接纳。
-> 想同时支持两个元组就得写成 `^0.2.0-rc.1 || ^0.2.1-alpha.1`——**两条 caret 缺一不可**，原因是
+> `0.1.7-rc.2` / `0.2.0-rc.*` / `0.2.1-alpha.1` 都只是上表里的历史校对记录，不再被范围接纳。
+> 想同时支持两个元组就得写成 `^0.2.0-rc.1 || ^0.2.1-alpha.2`——**两条 caret 缺一不可**，原因是
 > semver 对 prerelease 的两条规则叠加（实测 semver 7.8.5）：
 >
-> 1. 带 prerelease 标签的版本，只能被**元组相同**的比较器接纳——所以 `^0.2.1-alpha.1` 收下
->    `0.2.1-alpha.1` / `0.2.1-alpha.2` / `0.2.1` / `0.2.2`，但**不收** `0.2.0-rc.1`。
+> 1. 带 prerelease 标签的版本，只能被**元组相同**的比较器接纳——所以 `^0.2.1-alpha.2` 收下
+>    `0.2.1-alpha.2` / `0.2.1-alpha.3` / `0.2.1` / `0.2.2`，但**不收** `0.2.0-rc.1`，
+>    也**不收**更低的 `0.2.1-alpha.1`（下界就是 alpha.2）。
 > 2. 更隐蔽的一条：caret 在带 prerelease 时会把上界写成 **`<0.2.1-0`**（便于把下一元组的
->    prerelease 排除在外）。而 `0.2.1-alpha.1 > 0.2.1-0`（数字标识符 `0` 小于字母数字标识符
->    `alpha`），于是恰好被挡在门外。`0.2.1-alpha.1` 必须由**它自己那条** caret 接纳。
+>    prerelease 排除在外）。而 `0.2.1-alpha.2 > 0.2.1-0`（数字标识符 `0` 小于字母数字标识符
+>    `alpha`），于是恰好被挡在门外。`0.2.1-alpha.2` 必须由**它自己那条** caret 接纳。
 >
-> 也别写 `-0` 后缀去「放宽上界」（如 `>=0.2.1-alpha.1-0`）——实测它连 `0.2.1-alpha.1` 本身都不接纳。
+> 也别写 `-0` 后缀去「放宽上界」（如 `>=0.2.1-alpha.2-0`）——实测它连 `0.2.1-alpha.2` 本身都不接纳。
 >
 > **还有一道安装期闸门**（在 `@deepseek-ai/dsh-app-boot`）：`dsh plugin add` 会用
 > `semver.satisfies(runtimeVersion, peerRange, { includePrerelease: true })` 逐个检查
 > `@deepseek-ai/dsh*` 的 peer 范围，不满足就直接拒绝安装（并给出 `allow-version` 逃生口）。
 > 注意 `includePrerelease: true` 会**放宽**判定——实测
-> `satisfies('0.2.1-alpha.1', '^0.2.0-rc.1', { includePrerelease: true }) === true`，而严格
+> `satisfies('0.2.1-alpha.2', '^0.2.0-rc.1', { includePrerelease: true }) === true`，而严格
 > semver（npm 解析走的路径）是 `false`。所以「只支持一个运行时」靠的是把范围收窄成恰好一条，
 > 而不是指望闸门替我们挡住旧版；反过来，范围写错了也**装都装不上**。
 

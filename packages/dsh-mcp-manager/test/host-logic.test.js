@@ -491,7 +491,7 @@ describe('mcpClientLogToStatus（mcp-client 日志 → 挂载状态）', () => {
   })
 
   it('无法确认关闭（终态）→ 翻译成「停止重连」', () => {
-    // 0.1.7-rc.2 起各版（含 0.2.1-alpha.1）的 mcp-client 源码逐字节相同，这条是唯一措辞。
+    // 0.1.7-rc.2 起各版（含 0.2.1-alpha.2）的 mcp-client 源码逐字节相同，这条是唯一措辞。
     // 更早的 rc.8 措辞已不在受支持范围内（见下一条测试）。
     const update = mcpClientLogToStatus(
       log([

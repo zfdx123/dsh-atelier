@@ -28,10 +28,10 @@ dsh plugin --profile web add @zfdx123/dsh-memery
 
 ## 前置要求
 
-- DSH `^0.2.1-alpha.1`（各包的 `engines.dsh` 与 peer 范围都声明这一条；1.0.12 起**只**支持这一版，`0.1.7-rc.2` / `0.2.0-rc.1` / `0.2.0-rc.2` 都不再被接纳）。一条 caret 收不下**跨元组**的 prerelease——caret 带 prerelease 时上界是 `<X.Y.Z-0`，要同时支持两个元组就得写 `a || b`，两条缺一不可。安装期闸门在 `dsh-app-boot`，它用 `includePrerelease: true` 判定，所以范围写宽了不会当场报错，要等到真正装不上才发现
+- DSH `^0.2.1-alpha.2`（各包的 `engines.dsh` 与 peer 范围都声明这一条；1.0.13 起**只**支持这一版，`0.1.7-rc.2` / `0.2.0-rc.*` / `0.2.1-alpha.1` 都不再被接纳）。一条 caret 收不下**跨元组**的 prerelease——caret 带 prerelease 时上界是 `<X.Y.Z-0`，要同时支持两个元组就得写 `a || b`，两条缺一不可。安装期闸门在 `dsh-app-boot`，它用 `includePrerelease: true` 判定，所以范围写宽了不会当场报错，要等到真正装不上才发现
 - Node `^22.19.0 || >=24.0.0`（`dsh-codegraph` / `dsh-skills-manager` 为 `>=22`，`dsh-memery` 为 `>=22.13`）
 - 客户端界面用外壳自带的原生组件（`@deepseek-ai/dsh-client-ui-primitives`）；拿不到时逐处降级，不会白屏
-- peer `@deepseek-ai/cordis ~4.0.5-alpha.1`（照抄 0.2.1-alpha.1 自己的声明：cordis 从 `4.0.4` 升到 `4.0.5-alpha.1`，范围写旧了 `npm install` 直接 ERESOLVE）
+- peer `@deepseek-ai/cordis ~4.0.5-alpha.1`（照抄 0.2.1-alpha.2 自己的声明：cordis 从 `4.0.4` 升到 `4.0.5-alpha.1`，范围写旧了 `npm install` 直接 ERESOLVE）
 
 ## 装完没生效？
 

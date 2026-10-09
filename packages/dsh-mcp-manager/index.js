@@ -624,7 +624,7 @@ export function apply(ctx, config) {
   // 的键路径数组，`[]` 表示根节点本身就是 volatile 节点。
   //
   // 更早的 `settings/updated` 事件（0.1.6 及以前的契约，那时 `ns` 还是插件自取
-  // 的命名空间）已删除：`dsh-settings` 从 0.1.7-rc.2 到 0.2.1-alpha.1 **逐字节
+  // 的命名空间）已删除：`dsh-settings` 从 0.1.7-rc.2 到 0.2.1-alpha.2 **逐字节
   // 相同**，这些版本都没有这个事件，留着它只服务我们已不声明的版本。
   const onConfigChanged = () => scheduleSync(readServers())
   ctx.on('loader/volatile-update', onConfigChanged)
