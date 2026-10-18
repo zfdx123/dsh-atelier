@@ -201,10 +201,10 @@ mcp:
 | 组件 | 版本要求 |
 |---|---|
 | Node | **`^22.19.0 \|\| >=24.0.0`**（`undici` 8.x 的下限是 22.19.0；`@deepseek-ai/dsh-mcp-client` 依赖 `Promise.withResolvers`） |
-| DSH | **`^0.2.1-alpha.2`**（`engines.dsh` 与 peer 范围。本包在 1.0.5 那一版按 `0.1.7-rc.2` 的设置 API 重写过；1.0.13 起收窄到这一条，已实测；`0.1.7-rc.2` / `0.2.0-rc.*` 与更早的 `0.1.5` / `0.1.6-alpha.*` 都只是历史校对记录） |
-| `@deepseek-ai/dsh-mcp-client` | `^0.2.1-alpha.2`（peerDependency，由运行时提供；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
-| `@deepseek-ai/dsh-settings` | `^0.2.1-alpha.2`（peerDependency，可选：`ctx.settings` 由宿主提供） |
-| `@deepseek-ai/cordis` | `~4.0.5-alpha.1`（peerDependency；照抄 DSH 0.2.1-alpha.2 自己的声明） |
+| DSH | **`^0.2.1-rc.2`**（`engines.dsh` 与 peer 范围。本包在 1.0.5 那一版按 `0.1.7-rc.2` 的设置 API 重写过；1.0.14 起收窄到这一条，已实测；`0.1.7-rc.2` / `0.2.0-rc.*` / `0.2.1-alpha.*` 与更早的 `0.1.5` / `0.1.6-alpha.*` 都只是历史校对记录） |
+| `@deepseek-ai/dsh-mcp-client` | `^0.2.1-rc.2`（peerDependency，由运行时提供；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
+| `@deepseek-ai/dsh-settings` | `^0.2.1-rc.2`（peerDependency，可选：`ctx.settings` 由宿主提供） |
+| `@deepseek-ai/cordis` | `~4.0.5-alpha.1`（peerDependency；照抄 DSH 自己的声明。0.2.1-rc.2 把 cordis 转正成 `4.0.5`，这条带 prerelease 的范围仍收得下稳定版，故保持不变） |
 | `dsh` CLI + pnpm | `dsh plugin` 命令转发给 pnpm；本包按 profile 的 pnpm 布局安装 |
 
 普通依赖：`@deepseek-ai/schemastery`（配置 schema）与 `undici`（`^7.0.0 || ^8.0.0`，只用于按 origin 定制 TLS dispatcher）。客户端界面用外壳自带原生组件（`@deepseek-ai/dsh-client-ui-primitives`），拿不到时逐处降级，不会白屏。
@@ -257,37 +257,41 @@ mcp:
   MCP_LOG_CONTRACT_PRINT=1 node test/log-contract.test.js
   ```
 
-  同时把 `devDependencies` 的 `@deepseek-ai/dsh-mcp-client` 钉在**我们声明的**宿主版本（`^0.2.1-alpha.2`），让本地测试与线上同源——测试跑的就是受支持的版本。
+  同时把 `devDependencies` 的 `@deepseek-ai/dsh-mcp-client` 钉在**我们声明的**宿主版本（`^0.2.1-rc.2`），让本地测试与线上同源——测试跑的就是受支持的版本。
 
 ### 兼容性
 
 | 组件 | 版本要求 |
 |---|---|
 | Node | **`^22.19.0 \|\| >=24.0.0`** |
-| DSH | **`0.2.1-alpha.2`**（1.0.13 起只声明 `^0.2.1-alpha.2` 这一条，已实测） |
-| `@deepseek-ai/dsh-mcp-client` | `^0.2.1-alpha.2`（peerDependency；与 `0.1.7-rc.2` 起的各版源码逐字节相同，见下） |
-| `@deepseek-ai/dsh-settings` | `^0.2.1-alpha.2`（peerDependency；`ctx.settings` 由宿主提供） |
+| DSH | **`0.2.1-rc.2`**（1.0.14 起只声明 `^0.2.1-rc.2` 这一条，已实测） |
+| `@deepseek-ai/dsh-mcp-client` | `^0.2.1-rc.2`（peerDependency；与 `0.1.7-rc.2` 起的各版源码逐字节相同，见下） |
+| `@deepseek-ai/dsh-settings` | `^0.2.1-rc.2`（peerDependency；其 `lib/index.js` 自 `0.1.7-rc.2` 起逐字节相同——rc.2 只在包里新增了 `locale/*.json`） |
 | `@deepseek-ai/cordis` | `~4.0.5-alpha.1` |
 
-### 为什么只声明 0.2.1-alpha.2
+### 为什么只声明 0.2.1-rc.2
 
 本包声明**只支持一个运行时**，理由是这个运行时是唯一被实测过的版本，而 semver 的 prerelease
 规则让「同时声明几个元组」必须写成 `a || b` 而不是一条 caret——多声明的每一版都得自己跑一遍核对。
 
-`0.2.1-alpha.2` 这一轮，本包用到的一方包**源码逐字节相同**：`dsh-mcp-client`、`dsh-settings`
-（`lib/index.js` 22630B，rc.2 与 alpha.1 完全一致，`test/log-contract.test.js` 扫描的就是它）。
-真正变了的是**外围**：cordis 4.0.4 → 4.0.5-alpha.1、schemastery 3.18.4 → 3.18.5-alpha.1
-（后者逐字节相同，只差版本号），以及 `dsh-invariants` 整个包被上游删除（我们从不引用它）。
-cordis 这条尤其要紧：0.2.1-alpha.2 的每个 `@deepseek-ai/dsh-*` 都 peer 了
-`~4.0.5-alpha.1`，所以我们的 peer 范围再写 `^4.0.4` 就不是「宽松」而是**装不上**——
-严格 semver 下 `^4.0.4` 不接纳 `4.0.5-alpha.1`，`npm install` 直接 ERESOLVE（实测踩过，
-现在由 `release-check` 用 `SUPPORTED_CORDIS` 拦下）。
+`0.2.1-rc.2` 这一轮，本包用到的一方包**代码零变化**：`dsh-mcp-client` 整包逐字节相同
+（`lib/index.js` 35009B，`test/log-contract.test.js` 扫描的就是它），`dsh-settings` 的
+`lib/index.js`（22630B）同样逐字节相同，只是包里多了 `locale/*.json`。
+真正变了的是**外围**：cordis 4.0.5-alpha.1 → 4.0.5、schemastery 3.18.5-alpha.1 → 3.18.5、
+cosmokit 1.8.6-alpha.1 → 1.8.6，全部从 prerelease 转正（本轮没有任何包被删除）。
+cordis 这条尤其要紧：范围写旧了（如 `^4.0.4`）不是「宽松」而是**装不上**——严格 semver 下
+`^4.0.4` 不接纳 prerelease，`npm install` 直接 ERESOLVE（实测踩过，现在由 `release-check` 用
+`SUPPORTED_CORDIS` 拦下）；而现行的 `~4.0.5-alpha.1` 收得下转正后的 `4.0.5`（prerelease
+排除只作用于带 prerelease 的**版本**），所以不必跟着改。
 
-- 安装期 peer 兼容性闸门在 `dsh-app-boot`：`semver.satisfies(runtimeVersion, peerRange,
-  { includePrerelease: true })` 逐个检查 `@deepseek-ai/dsh*` 的 peer 范围，不满足就直接拒绝安装
-  （`Plugin … is incompatible with dsh …`，并给出 `allow-version` 逃生口）。注意这个判定**比严格
-  semver 宽**：`satisfies('0.2.1-alpha.2', '^0.2.0-rc.1', { includePrerelease: true }) === true`，
-  而 npm 解析用的严格 semver 是 `false`。所以「只支持一版」是**我们**把范围收窄成恰好一条的结果，
+- 安装期闸门在 `dsh-app-boot`（`evaluatePluginCompatibility`）。**0.2.1-rc.2 起判定顺序变了**：
+  它**先看 `engines.dsh`——有它就只用它、peer 全部忽略**；只有 manifest 里没有 `engines.dsh` 时才
+  回退去逐个检查 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 的 peer 范围。不满足就拒绝安装
+  （`Plugin … is incompatible with dsh …`，并给出 `allow-version` 逃生口）。本包声明了 `engines.dsh`，
+  所以决定装不装得上的是它那一条 caret（同一函数也在启动时按 profile 的 bundle 清单复查一遍，
+  不满足的 bundle 会被 `skipping profile bundle …` 跳过）。判定本身**比严格 semver 宽**：
+  `satisfies('0.2.1-alpha.1', '^0.2.0-rc.1', { includePrerelease: true }) === true`，而 npm 解析用的
+  严格 semver 是 `false`。所以「只支持一版」是**我们**把范围收窄成恰好一条的结果，
   不是闸门替我们挡住的；反过来，范围写错了（如把 cordis 留在 `^4.0.4`）**装都装不上**。
 - 宿主的根 Include 会把裸包名（非 `.`/`cordis:` 开头）用**宿主自己的安装位置**解析
   （`dsh-app-boot` 的 `HostResolvedRootInclude`），所以插件运行时拿到的始终是宿主的
@@ -297,13 +301,16 @@ cordis 这条尤其要紧：0.2.1-alpha.2 的每个 `@deepseek-ai/dsh-*` 都 pee
 核对方式（可复现）：用隔离的 `DSH_HOME` 把本包（`file:` 规格，即工作区源码）装进目标版本的
 web profile，7 个包全部安装成功、`--dump-config` 里 7 行齐备、真启动到
 `dsh web: http://127.0.0.1:<port>/` 且无插件装载报错；本包的 `devDependencies` 钉在最新受支持版
-（`0.2.1-alpha.2`），所以 `npm test` 跑的就是它（含全部单测与 E2E）。
-这套流程在 `0.2.0-rc.1` / `0.2.0-rc.2` / `0.2.1-alpha.1` / `0.2.1-alpha.2` 上各跑过一次，并配了**闸门阳性对照**
-（故意把一条 peer 打回旧版，确认安装确实被拒——否则无法区分「闸门放行」与「闸门没跑」）。
+（`0.2.1-rc.2`），所以 `npm test` 跑的就是它（含全部单测与 E2E）。
+这套流程在 `0.2.0-rc.1` / `0.2.0-rc.2` / `0.2.1-alpha.1` / `0.2.1-alpha.2` / `0.2.1-rc.2` 上各跑过一次，
+并配了**闸门阳性对照**——rc.2 起闸门只看 `engines.dsh`，所以对照也改成打坏 `engines.dsh`
+（`^0.2.1-rc.3` 与跨元组的 `^0.1.7-rc.2`）：直接调 `evaluatePluginCompatibility` 两次都被拒，
+把坏副本装进隔离 profile 启动时也确实输出 `skipping profile bundle … is incompatible with dsh 0.2.1-rc.2`
+——否则无法区分「闸门放行」与「闸门没跑」。
 
-### 历史修复记录（当前版本 1.0.13）
+### 历史修复记录（当前版本 1.0.14）
 
-本包版本已到 **1.0.13**；下面两张表是**历史**版本的修复记录，保留下来是因为它们记录了「代码为什么长这样」（表内的版本与 peer 范围是**当时**的，不是当前声明）。表里引用的 `0.1.5` / `0.1.6-alpha.x` 都是 **DSH 侧**（或 mcp-client 侧）的版本号，不是本包的版本。
+本包版本已到 **1.0.14**；下面两张表是**历史**版本的修复记录，保留下来是因为它们记录了「代码为什么长这样」（表内的版本与 peer 范围是**当时**的，不是当前声明）。表里引用的 `0.1.5` / `0.1.6-alpha.x` 都是 **DSH 侧**（或 mcp-client 侧）的版本号，不是本包的版本。
 
 #### 0.3.4（历史）：按 DSH 0.1.6-alpha.1 的核对结果做的修复
 
