@@ -1,6 +1,6 @@
 # @zfdx123/dsh-superpowers
 
-Brings the [obra/superpowers](https://github.com/obra/superpowers) software-development methodology to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): it registers 15 skills on `ctx.skills` (brainstorming, planning, TDD, systematic debugging, code review, session diagnosis, and more) and injects the `using-superpowers` bootstrap as a system-prompt section, so it is present from the first request and survives context compaction. The skills are registered at runtime and never written to disk, so nothing is copied into `~/.dsh/skills` and no preset or profile skill directory has to change. This is version 1.0.14, targeting DSH `^0.2.1-rc.2` (tested).
+Brings the [obra/superpowers](https://github.com/obra/superpowers) software-development methodology to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): it registers 15 skills on `ctx.skills` (brainstorming, planning, TDD, systematic debugging, code review, session diagnosis, and more) and injects the `using-superpowers` bootstrap as a system-prompt section, so it is present from the first request and survives context compaction. The skills are registered at runtime and never written to disk, so nothing is copied into `~/.dsh/skills` and no preset or profile skill directory has to change. This is version 1.0.15, targeting DSH `^0.2.1-rc.2` (tested).
 
 ## Installation
 
