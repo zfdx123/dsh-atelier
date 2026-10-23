@@ -172,7 +172,15 @@ codegraph 的官方 MCP server 在工作区**未建立索引时暴露 0 个工�
       `<profile>/node_modules/.bin`。
    3. `PATH`——沿用你已有的全局安装：`npm i -g @colbymchenry/codegraph`（或官方 install.sh / npm thin shim）。
 
-   想手动确认 CLI 可用：
+    Windows 上 npm/pnpm 生成的是 `codegraph.cmd`。Node ≥ 18.20 不再允许直接 spawn `.cmd`/`.bat`
+    （`spawn EINVAL`，CVE-2024-27980 加固），而 DSH 的 subprocess 服务按 argv 原样 spawn；插件在
+    spawn 前把 shim 展开成它实际执行的 `node <entry.js>`（无法解析时回退到依赖自带的 `npm-shim.js`），
+    因此 Windows 上同样不需要全局安装、也不经过 cmd.exe；展开失败会点名该 shim 报错，而不是抛裸 EINVAL。
+
+    每次 CLI 调用还会带上 `CODEGRAPH_NO_WATCHDOG=1`：CodeGraph 的 liveness watchdog 是为长驻 `serve`
+    设计的，冷启动 `init`/`index` 在慢盘上可能被它误杀（上游 CLI #850/#1231）。
+
+    想手动确认 CLI 可用：
 
    ```sh
    codegraph --version                  # 全局安装时；包内那份在 <包>/node_modules/.bin/codegraph
@@ -206,7 +214,8 @@ codegraph 的官方 MCP server 在工作区**未建立索引时暴露 0 个工�
 ├── package.json          # DSH bundle 声明（dsh.bundle.patch）+ 运行时/peer/dev 依赖
 ├── cordis.patch.yml      # 组合层 patch（把本插件的 node half 插入 host 组合）
 ├── lib/index.js          # 插件实现：注册 codegraph_* 工具（core 4 个 / full 13 个）+ frontload
-├── lib/executable.js     # codegraph 可执行文件解析（包内 .bin → PATH，DSH_CODEGRAPH_EXECUTABLE 覆盖）
+├── lib/executable.js     # codegraph 可执行文件解析（包内 .bin → PATH，DSH_CODEGRAPH_EXECUTABLE 覆盖；Windows .cmd 展开）
+├── lib/json-budget.js    # codegraph_files 的 JSON 预算截断（合法 JSON + truncated 标记）
 └── test/                 # 运行时兼容性 harness（真实 CLI + 桩 cordis 服务）
 ```
 
@@ -284,9 +293,14 @@ npm test        # 真实 CLI 生命周期 + 全部工具 + frontload 门控（�
 `surface: 'full'` 下 13 个工具全部注册并真实执行（`status` → `init` → `query` / `node`
 （符号模式与文件模式）/ `explore` / `files` / `callers` / `callees` / `impact` / `affected`
 → `sync`）、**frontload**（结构性 prompt 注入 `<codegraph_context>`，且来源必须是
-`kind: 'plugin'` + `form: 'notice'`；同文重发去重；非结构性 / 未索引 / 自循环 / 他源
+`kind: 'plugin:dsh-codegraph'` + `form: 'notice'`；同文重发去重；非结构性 / 未索引 / 自循环 / 他源
 prompt 静默跳过；`frontload:false` 不注册监听器）、**无执行器服务时 apply 不抛错**
 （惰性解析，启动顺序安全）、显式 `path` 覆盖会话 cwd、以及「无 cwd 且无 path 时报错」。
+
+还覆盖三个容易被平台差异掩盖的点：Windows `.cmd`/`.bat` 启动器**展开成可直接 spawn 的
+`node <entry>`**（Node ≥ 18.20 裸 spawn `.cmd` 会 EINVAL 的回归；含参数带空格 / `&` / 引号的透传）、
+每一次 CLI 调用都携带 `CODEGRAPH_NO_WATCHDOG=1`、以及 `codegraph_files` 超过输出预算时
+**仍是合法 JSON**（`{ files, truncated }`，不会截成半份文档）。
 
 **可执行文件解析也在测试里**：套件断言 `package.json` 声明了 `@colbymchenry/codegraph`、
 依赖确实装在包内、解析结果就是**包内 `node_modules/.bin` 的 shim**（并核对它不在 PATH 上），

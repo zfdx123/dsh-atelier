@@ -46,6 +46,17 @@
 // official install.sh / thin shim) keeps working; a clearer error is thrown
 // when it is missing. `DSH_CODEGRAPH_EXECUTABLE` pins one path explicitly.
 //
+// Windows: npm/pnpm install a `codegraph.cmd` launcher, and Node >= 18.20
+// refuses to spawn `.cmd`/`.bat` directly (`spawn EINVAL`, the
+// CVE-2024-27980 hardening) — the subprocess service spawns argv as-is. The
+// launcher is therefore expanded to the Node program and entry script it would
+// have run (`node <entry.js>`) before spawning. Separately, every run carries
+// `CODEGRAPH_NO_WATCHDOG=1`: CodeGraph's liveness watchdog can mis-kill a
+// short-lived `init`/`index` when cold-start parsing or a slow disk blocks its
+// main thread past the watchdog timeout, which is exactly the long synchronous
+// work this plugin starts (upstream CLI #850/#1231). One-shot CLI runs never
+// need the watchdog; only the long-lived `serve` path does.
+//
 // Harness contract: verified against DSH `0.1.5-rc.1` (CLI) with its
 // `0.1.5-rc.2` first-party packages, re-verified against DSH `0.1.6-alpha.1`,
 // `0.1.6-alpha.2`, `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-alpha.1`, `0.2.1-alpha.2`, and
@@ -81,7 +92,8 @@ import { dirname, join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
-import { executableHint, resolveCodegraphExecutable } from './executable.js'
+import { executableHint, resolveCodegraphExecutable, buildLaunchArgv } from './executable.js'
+import { fitJson } from './json-budget.js'
 
 export const name = 'dsh-codegraph'
 
@@ -355,9 +367,22 @@ export function apply(ctx, config = {}) {
           throw new Error('dsh-codegraph: ' + detail)
         }
       }
+      // Windows shims are not spawnable as-is; expand one to the Node program
+      // and entry script it would have run. A shape we cannot expand is an
+      // install problem and is named as such instead of surfacing `EINVAL`.
+      let launchArgv
+      try {
+        launchArgv = buildLaunchArgv(resolvedExe.value, argv)
+      } catch (error) {
+        throw new Error('dsh-codegraph: ' + (error && error.message ? error.message : String(error)))
+      }
       const proc = sub.spawn({
-        argv: [resolvedExe.value].concat(argv),
+        argv: launchArgv,
         cwd: cwd || '/',
+        // The CLI's liveness watchdog exists for the long-lived `serve` path;
+        // for one-shot init/index it can mis-kill a run that blocks its main
+        // thread on cold-start parsing or a slow disk (upstream #850/#1231).
+        env: { CODEGRAPH_NO_WATCHDOG: '1' },
         stdio: {
           stdin: 'ignore',
           stdout: { maxBytes: 8 * 1024 * 1024, spill: { maxBytes: 64 * 1024 * 1024 } },
@@ -399,6 +424,8 @@ export function apply(ctx, config = {}) {
       timeoutMs: timeoutMs || 120000,
       signal,
       stdoutMaxBytes: 8 * 1024 * 1024,
+      // Same watchdog opt-out as the subprocess path (see above).
+      env: { CODEGRAPH_NO_WATCHDOG: '1' },
     })
     const result = await shell.run(spec)
     const text = stripAnsi(result.stdout ? result.stdout.text : '')
@@ -449,6 +476,17 @@ export function apply(ctx, config = {}) {
         }
         const argv = buildArgv(args, projectRoot)
         const out = await runCodegraph({ argv, cwd: projectRoot, signal: exec.signal, timeoutMs: opts.timeoutMs })
+        // A big repository's `files --json` list exceeds the output budget.
+        // Cutting the text would leave half a JSON document; drop whole
+        // records instead and report the count in a `truncated` marker.
+        if (name === 'codegraph_files') {
+          try {
+            const parsed = JSON.parse(out)
+            if (Array.isArray(parsed)) return fitJson(parsed, 180000)
+          } catch {
+            // Not JSON (an error or a human-readable notice) — plain truncation.
+          }
+        }
         return truncate(out, 200000)
       },
       presentCall: (args) => ({
@@ -595,7 +633,7 @@ export function apply(ctx, config = {}) {
 
   registerTool(
     'codegraph_files',
-    'Show the project file structure from the index as JSON (paths, languages, symbol counts). Supports filtering by directory, glob pattern, and tree/flat/grouped formats. Requires an initialized project.',
+    'Show the project file structure from the index as JSON (paths, languages, symbol counts). Supports filtering by directory, glob pattern, and tree/flat/grouped formats. Requires an initialized project. On a large repository the list is cut to fit the output budget without breaking JSON: the result is `{ "files": [...], "truncated": { "dropped", "kept", "total" } }`, and `filter`/`pattern` narrow it to get the omitted paths.',
     {
       path: { type: 'string', description: 'Project directory (default: the current session workspace).' },
       filter: { type: 'string', description: 'Only files under this directory.' },

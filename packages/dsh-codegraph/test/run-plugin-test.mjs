@@ -78,7 +78,6 @@ if (!existsSync(join(pluginRoot, 'lib', 'index.js'))) {
 const plugin = await import(pathToFileURL(join(pluginRoot, 'lib/index.js')).href)
 console.log(`plugin under test: ${pluginRoot}`)
 
-// --- cross-platform process execution ---------------------------------------
 // Mirrors @deepseek-ai/dsh-subprocess-local's candidate search: bare PATH name
 // plus PATHEXT extensions on Windows.
 function executableCandidates(command) {
@@ -96,13 +95,6 @@ function resolveExecutable(command) {
   throw new Error(`not found on PATH: ${command}`)
 }
 
-// cmd.exe needs its own quoting; only quote when the token would otherwise be
-// split or reinterpreted.
-function quoteForCmd(value) {
-  const text = String(value)
-  return /[\s"&|<>^()]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
-}
-
 // Launch one argv and capture both streams.
 //
 // Stdio is FILE-backed rather than piped on purpose. A DSH sandbox denies a
@@ -112,9 +104,12 @@ function quoteForCmd(value) {
 // work everywhere, and the contract under test is
 // `collected.stdout.readFrom(0).text`, not the transport.
 //
-// POSIX executes the resolved path directly. Windows cannot exec a .cmd/.bat
-// without a terminal, so those go through cmd.exe — the same hop a real Windows
-// executor makes.
+// The REAL service spawns argv as-is: dsh-subprocess-local's spawnSubprocess
+// calls `node:child_process.spawn(program, args)` with no shell. This harness
+// must do the same — wrapping a `.cmd` in cmd.exe here (as this file used to)
+// would hide the Windows launcher bug instead of reproducing it: Node >= 18.20
+// refuses to spawn `.cmd`/`.bat` directly, and the plugin is what must expand
+// the shim (lib/executable.js `buildLaunchArgv`).
 const CAPTURE_DIR = join(REPO_ROOT, '.test-capture')
 let captureSeq = 0
 
@@ -132,10 +127,7 @@ function runProcess(argv, options = {}) {
     rmSync(stdoutPath, { force: true })
     rmSync(stderrPath, { force: true })
   }
-  const onWindowsShim = process.platform === 'win32' && /\.(cmd|bat)$/i.test(exe)
-  const command = onWindowsShim ? process.env.ComSpec || 'cmd.exe' : exe
-  const args = onWindowsShim ? ['/d', '/s', '/c', [exe, ...rest].map(quoteForCmd).join(' ')] : rest
-  const child = spawn(command, args, { ...options, stdio: ['ignore', stdoutFd, stderrFd] })
+  const child = spawn(exe, rest, { ...options, stdio: ['ignore', stdoutFd, stderrFd] })
   return new Promise((resolvePromise, rejectPromise) => {
     child.on('error', (error) => {
       sweep()
@@ -157,9 +149,8 @@ section('0) environment')
 // first, then PATH); this suite resolves it the same way, so "the suite passes"
 // means "the declared dependency is what actually ran", which is exactly the
 // install this change fixes. Nothing here needs a global install anymore.
-const { executableHint, findLocalExecutable, resolveCodegraphExecutable } = await import(
-  pathToFileURL(join(pluginRoot, 'lib', 'executable.js')).href
-)
+const { executableHint, findLocalExecutable, resolveCodegraphExecutable, buildLaunchArgv, expandWindowsShim } =
+  await import(pathToFileURL(join(pluginRoot, 'lib', 'executable.js')).href)
 // CG_EXECUTABLE used to work through the stub `resolveExecutable` alone; with
 // local-first resolution the plugin only reaches that stub when no shim is
 // installed, so the harness hands the override over as the plugin's own.
@@ -214,9 +205,13 @@ try {
   } else {
     ok('resolution picks the package-local shim over the global install', codegraphExe)
   }
-  const probe = await runProcess([codegraphExe, '--version'])
+  // On Windows the resolved path is a `.cmd` launcher: spawn it raw and Node
+  // fails with EINVAL. Probe the SAME argv the plugin builds — this proves the
+  // expansion is spawnable, not merely that the file exists.
+  const probeArgv = buildLaunchArgv(codegraphExe, ['--version'])
+  const probe = await runProcess(probeArgv)
   if (probe.exitCode === 0 && /\d+\.\d+\.\d+/.test(probe.stdout)) {
-    ok('codegraph CLI reachable', `${codegraphExe} \u2192 v${probe.stdout.trim()}`)
+    ok('codegraph CLI reachable', `${probeArgv[0]} \u2192 v${probe.stdout.trim()}`)
   } else {
     bad('codegraph --version produced no version', `exit=${probe.exitCode} ${probe.stderr.trim()}`)
   }
@@ -225,6 +220,167 @@ try {
   console.log('\nInstall the declared dependency first: npm install')
   console.log('(or a global CLI, which the plugin also accepts: npm i -g @colbymchenry/codegraph)')
   process.exit(1)
+}
+
+// === 0b) Windows launcher shims ============================================
+// Node >= 18.20 refuses to spawn a `.cmd`/`.bat` directly (EINVAL, the
+// CVE-2024-27980 hardening), and the DSH subprocess service spawns argv as-is.
+// The plugin must therefore expand the shim into the program + entry script it
+// would have run. These cases are self-contained (temp shims) so they prove the
+// expansion itself, not just this machine's install.
+section('0b) Windows .cmd launcher expands to a directly spawnable argv')
+if (process.platform !== 'win32') {
+  console.log('  (skipped: Windows-only launcher behavior)')
+} else {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-codegraph-shim-'))
+  try {
+    const binDir = join(root, 'node_modules', '.bin')
+    const pkgDir = join(root, 'node_modules', 'fake-pkg')
+    mkdirSync(binDir, { recursive: true })
+    mkdirSync(pkgDir, { recursive: true })
+    const entry = join(pkgDir, 'cli.js')
+    writeFileSync(entry, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))\n', 'utf8')
+    const shim = join(binDir, 'codegraph.cmd')
+    writeFileSync(
+      shim,
+      [
+        '@ECHO off',
+        'SETLOCAL',
+        'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\..\\fake-pkg\\cli.js" %*',
+        '',
+      ].join('\r\n'),
+      'utf8',
+    )
+    const shape = expandWindowsShim(shim)
+    if (shape !== null && shape.command === process.execPath && resolve(shape.args.at(-1)) === resolve(entry)) {
+      ok('npm-style .cmd parsed into `node <entry>`', `${shape.command} ${shape.args.join(' ')}`)
+    } else {
+      bad('.cmd shim was not parsed', JSON.stringify(shape))
+    }
+
+    const args = ['explore', 'C:\\a b\\proj', 'a&b', 'quote"inside']
+    const launch = buildLaunchArgv(shim, args)
+    if (launch[0] === process.execPath && resolve(launch[1]) === resolve(entry) && launch.length === args.length + 2) {
+      ok('buildLaunchArgv returns a spawnable argv, not the .cmd', launch[0])
+    } else {
+      bad('buildLaunchArgv did not expand the shim', JSON.stringify(launch))
+    }
+    try {
+      const probe = await runProcess(launch)
+      const echoed = JSON.parse(probe.stdout)
+      if (probe.exitCode === 0 && JSON.stringify(echoed) === JSON.stringify(args)) {
+        ok('expanded argv spawns raw (no cmd.exe hop) with every argument intact', JSON.stringify(echoed))
+      } else {
+        bad('expanded argv did not round-trip the arguments', `exit=${probe.exitCode} ${probe.stdout} ${probe.stderr}`)
+      }
+    } catch (error) {
+      bad('expanded argv is not spawnable', null, error.message)
+    }
+
+    // A shim whose text is not the npm shape still has a known entry: the
+    // dependency's own npm-shim.js next to `.bin`. The expansion falls back to
+    // it instead of surfacing EINVAL.
+    const badRoot = mkdtempSync(join(tmpdir(), 'dsh-codegraph-shim-bad-'))
+    try {
+      const badBin = join(badRoot, 'node_modules', '.bin')
+      const depDir = join(badRoot, 'node_modules', '@colbymchenry', 'codegraph')
+      mkdirSync(badBin, { recursive: true })
+      mkdirSync(depDir, { recursive: true })
+      const npmShim = join(depDir, 'npm-shim.js')
+      writeFileSync(npmShim, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))\n', 'utf8')
+      const customShim = join(badBin, 'codegraph.cmd')
+      writeFileSync(customShim, '@ECHO off\r\nCALL some-custom-launcher.bat %*\r\n', 'utf8')
+      const fallback = buildLaunchArgv(customShim, ['status'])
+      if (fallback[0] === process.execPath && resolve(fallback[1]) === resolve(npmShim)) {
+        ok('an unrecognized shim falls back to the dependency npm-shim.js', 'node ' + fallback[1])
+      } else {
+        bad('unrecognized shim did not use the known npm shim', JSON.stringify(fallback))
+      }
+
+      // With no entry to fall back to, the failure must NAME the shim — a bare
+      // `spawn EINVAL` gives the user nothing to act on.
+      const hopelessRoot = mkdtempSync(join(tmpdir(), 'dsh-codegraph-shim-hopeless-'))
+      try {
+        const hopelessShim = join(hopelessRoot, 'codegraph.cmd')
+        writeFileSync(hopelessShim, '@ECHO off\r\nCALL custom.bat %*\r\n', 'utf8')
+        let message = null
+        try {
+          buildLaunchArgv(hopelessShim, ['status'])
+        } catch (error) {
+          message = error.message
+        }
+        if (message && /entry script could not be determined/.test(message) && message.includes(hopelessShim)) {
+          ok('an unexpandable shim fails with a message naming it (not EINVAL)', message.slice(0, 90))
+        } else {
+          bad('unexpandable shim did not produce an actionable error', String(message))
+        }
+      } finally {
+        rmSync(hopelessRoot, { recursive: true, force: true })
+      }
+    } finally {
+      rmSync(badRoot, { recursive: true, force: true })
+    }
+    rmSync(root, { recursive: true, force: true })
+  } catch (error) {
+    bad('Windows launcher test crashed', null, error.message)
+  }
+}
+
+// === 0c) JSON budget truncation =============================================
+// The tool advertises JSON, so an over-budget payload must stay parseable.
+// Cutting the serialized string (the old behavior) leaves a half document.
+section('0c) JSON budget truncation always returns parseable JSON')
+{
+  const { fitJson } = await import(pathToFileURL(join(pluginRoot, 'lib/json-budget.js')).href)
+  const small = [{ path: 'src/a.ts', language: 'typescript' }]
+  if (fitJson(small, 4000) === JSON.stringify(small, null, 2)) {
+    ok('a payload within budget is returned unchanged')
+  } else {
+    bad('an under-budget payload was rewritten')
+  }
+
+  const many = Array.from({ length: 1200 }, (_, i) => ({
+    path: `src/dir-${i % 20}/file-${i}.ts`,
+    language: 'typescript',
+  }))
+  const arrayText = fitJson(many, 6000)
+  try {
+    const parsed = JSON.parse(arrayText)
+    if (!Array.isArray(parsed.files) || !parsed.truncated || parsed.truncated.dropped <= 0) {
+      bad('an over-budget array did not become { files, truncated }', arrayText.slice(0, 120))
+    } else if (parsed.files.length + parsed.truncated.dropped !== many.length) {
+      bad('array truncation counts do not add up', JSON.stringify(parsed.truncated))
+    } else if (arrayText.length > 6000) {
+      bad('array truncation exceeded the budget', String(arrayText.length))
+    } else {
+      ok('over-budget array → valid JSON with a truncated marker', `kept=${parsed.files.length}`)
+    }
+  } catch (error) {
+    bad('over-budget array output is not JSON', arrayText.slice(0, 120), error.message)
+  }
+
+  const objectText = fitJson({ mode: 'flat', total: many.length, files: many }, 6000)
+  try {
+    const parsed = JSON.parse(objectText)
+    if (!Array.isArray(parsed.files) || !parsed.truncated || parsed.mode !== 'flat') {
+      bad('an over-budget object lost its shape or marker', objectText.slice(0, 120))
+    } else if (parsed.files.length + parsed.truncated.dropped !== many.length) {
+      bad('object truncation counts do not add up', JSON.stringify(parsed.truncated))
+    } else {
+      ok('over-budget object keeps its shape plus the truncated marker', `kept=${parsed.files.length}`)
+    }
+  } catch (error) {
+    bad('over-budget object output is not JSON', objectText.slice(0, 120), error.message)
+  }
+
+  let rejected = false
+  try {
+    fitJson({ nope: true }, 100)
+  } catch (error) {
+    rejected = error instanceof TypeError
+  }
+  if (rejected) ok('a payload without a file list is rejected, not mis-truncated')
+  else bad('fitJson accepted a payload without a files array')
 }
 
 // --- stub cordis services ---------------------------------------------------
@@ -239,6 +395,7 @@ try {
 // them makes the assertion blind — which is exactly how the first version of
 // test 8f passed even with the discriminator reverted.
 const spawnedArgv = []
+const spawnedEnvs = []
 const shellCommands = []
 const cliInvocations = () => [...spawnedArgv.map((a) => a.join(' ')), ...shellCommands]
 const spawnedMatching = (pattern) => cliInvocations().filter((line) => pattern.test(line))
@@ -248,10 +405,14 @@ const subprocessService = {
   async resolveExecutable(name) {
     return resolveExecutable(name)
   },
-  spawn({ argv, cwd, signal }) {
+  spawn({ argv, cwd, signal, env }) {
     spawnedArgv.push(argv)
+    spawnedEnvs.push(env)
     const settle = runProcess(argv, {
       cwd: cwd || undefined,
+      // The service merges the caller's env over the scrubbed parent env; for
+      // the harness the parent env is what the CLI needs (PATH, SystemRoot…).
+      env: { ...process.env, ...(env || {}) },
       stdio: ['ignore', 'pipe', 'pipe'],
       signal,
     })
@@ -284,6 +445,7 @@ const shellService = {
       timeoutMs: request.timeoutMs || 120000,
       stdoutMaxBytes: request.stdoutMaxBytes || 8 * 1024 * 1024,
       signal: request.signal,
+      env: request.env,
     }
   },
   async run(spec) {
@@ -740,9 +902,104 @@ section('6c) every CLI call ran the package-local shim, not a global install')
   } else if (!expected) {
     bad('nothing to compare against: no shim and no CG_EXECUTABLE')
   } else {
-    const foreign = spawned.filter((argv) => resolve(argv[0]) !== resolve(expected))
-    if (foreign.length === 0) ok(`${spawned.length} recorded CLI call(s) all ran ${expected}`)
-    else bad('a CLI call did not run the expected executable', `${foreign.length}/${spawned.length}: ${foreign[0][0]}`)
+    // Compare the LAUNCH PREFIX, not argv[0]: on Windows a `.cmd` shim is
+    // expanded to `[node, <entry>]`, which is exactly what proves the shim —
+    // and not some other binary — is what runs.
+    const prefix = buildLaunchArgv(expected, [])
+    const foreign = spawned.filter((argv) => prefix.some((token, index) => argv[index] !== token))
+    if (foreign.length === 0) ok(`${spawned.length} recorded CLI call(s) all launched through ${expected}`)
+    else
+      bad('a CLI call did not launch the expected executable', `${foreign.length}/${spawned.length}: ${foreign[0][0]}`)
+    if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(prefix[0])) {
+      bad('a .cmd/.bat was passed as the spawn program — Node refuses it (EINVAL)', prefix[0])
+    }
+  }
+}
+
+// === 6d) the liveness-watchdog opt-out reaches every run ====================
+section("6d) every CLI run disables CodeGraph's liveness watchdog")
+{
+  // `codegraph init`/`index` are long, synchronous one-shot runs; the CLI's
+  // watchdog exists for the `serve` daemon and can kill a valid cold start
+  // (upstream #850/#1231). `CODEGRAPH_NO_WATCHDOG=1` is the documented opt-out.
+  const missing = spawnedEnvs.filter((env) => !env || env.CODEGRAPH_NO_WATCHDOG !== '1')
+  if (spawnedEnvs.length === 0) {
+    bad('no spawn environment was recorded')
+  } else if (missing.length === 0) {
+    ok(`${spawnedEnvs.length} spawn(s) carried CODEGRAPH_NO_WATCHDOG=1`)
+  } else {
+    bad('a CLI run was started without CODEGRAPH_NO_WATCHDOG=1', `${missing.length}/${spawnedEnvs.length}`)
+  }
+}
+
+// === 6e) codegraph_files stays valid JSON past the output budget ============
+section('6e) an over-budget file list is truncated to valid JSON, not a half document')
+{
+  const files = Array.from({ length: 4000 }, (_, i) => ({
+    path: `src/very/long/directory/name-${i % 40}/file-${i}.ts`,
+    language: 'typescript',
+    nodeCount: 3,
+    size: 120,
+  }))
+  const payload = JSON.stringify(files, null, 2)
+  if (payload.length <= 180000) {
+    bad('the synthetic file list is not over the output budget', String(payload.length))
+  }
+  const tools = []
+  const textReader = (text) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
+  const ctx = {
+    tools: {
+      register(tool) {
+        tools.push(tool)
+        return () => {}
+      },
+    },
+    systemPrompt: {
+      section() {
+        return () => {}
+      },
+    },
+    on() {
+      return () => {}
+    },
+    get(name) {
+      if (name !== 'subprocess') return undefined
+      return {
+        async resolveExecutable() {
+          return process.execPath
+        },
+        spawn() {
+          return {
+            collected: { stdout: textReader(payload), stderr: textReader('') },
+            done: Promise.resolve({ exitCode: 0 }),
+          }
+        },
+      }
+    },
+  }
+  plugin.apply(ctx, { guideSearch: false, surface: 'full' })
+  const tool = tools.find((entry) => entry.name === 'codegraph_files')
+  if (!tool) {
+    bad('codegraph_files is missing from the full surface')
+  } else {
+    const out = String(await tool.execute({}, makeExec(FIXTURE_DIR)))
+    try {
+      const parsed = JSON.parse(out)
+      if (!Array.isArray(parsed.files) || !parsed.truncated) {
+        bad('truncated output is not the documented { files, truncated } object', out.slice(0, 120))
+      } else if (parsed.files.length + parsed.truncated.dropped !== files.length) {
+        bad('truncated counts do not add up', JSON.stringify(parsed.truncated))
+      } else if (out.length > 180000) {
+        bad('truncated output still exceeds the budget', String(out.length))
+      } else {
+        ok(
+          'over-budget file list becomes valid JSON with a truncated marker',
+          `kept=${parsed.files.length} dropped=${parsed.truncated.dropped}`,
+        )
+      }
+    } catch (error) {
+      bad('over-budget codegraph_files output is not valid JSON', out.slice(0, 120), error.message)
+    }
   }
 }
 
