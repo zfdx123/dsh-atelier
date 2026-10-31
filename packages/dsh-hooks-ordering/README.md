@@ -204,9 +204,9 @@ ctx.plugin(HookOrdering, { log: './hooks-ordering-dag.json' })
 
 ## 前置要求
 
-- DeepSeek Harness `^0.2.1-rc.2`（`engines.dsh`）
+- DeepSeek Harness `^0.2.2-alpha.2`（`engines.dsh`）
 - Node `^22.19.0 || >=24.0.0`
-- peer `@deepseek-ai/cordis ~4.0.5-alpha.1`；dsh 层另外声明可选的 peer `@deepseek-ai/dsh-settings ^0.2.1-rc.2`
+- peer `@deepseek-ai/cordis ~4.0.6-alpha.1`；dsh 层另外声明可选的 peer `@deepseek-ai/dsh-settings ^0.2.2-alpha.2`
 - 设置页需要 web profile（`dsh.client.platform = web`）与外壳的客户端组件表；拿不到原生组件时表单逐处降级，但页面本身仍需客户端那一半
 
 ## 已知限制

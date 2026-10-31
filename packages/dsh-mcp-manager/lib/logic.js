@@ -304,7 +304,8 @@ export const MCP_LOG_RULES = [
   {
     // 终态：settleFailedGeneration 直接 return，不再 scheduleReconnect。
     //
-    // 只认现行措辞。0.1.7-rc.2 起各版（含 0.2.1-alpha.2 与 0.2.1-rc.2）的 mcp-client 源码**逐字节相同**，
+    // 只认现行措辞。0.1.7-rc.2 → 0.2.1-rc.2 各版 mcp-client 源码**逐字节相同**；0.2.2-alpha.2
+    // 只多了一处 resources 能力守卫（resources/* 两个分支），tools 与生命周期文案逐词未变，
     // 都是 `could not confirm transport closure`；更早的 rc.8 措辞
     // （`did not close within <ms>ms`）已不在受支持范围内，交给下面的未识别透传
     // 兜底——那同样会报成 error 并带上原文，不会变成「看起来正常」。

@@ -124,9 +124,9 @@ await fetch('/api-ext/session.cleaner.diag', {
 
 ## 前置要求
 
-- DeepSeek Harness `^0.2.1-rc.2`（`engines.dsh`），且是 **web profile**：宿主侧声明 `webServer`、`workspaceRegistry`、`sessions`、`agents`、`storageDomain`，客户端侧要 `slots`/`locale`/`sessions`/`uiWorkspace`
+- DeepSeek Harness `^0.2.2-alpha.2`（`engines.dsh`），且是 **web profile**：宿主侧声明 `webServer`、`workspaceRegistry`、`sessions`、`agents`、`storageDomain`，客户端侧要 `slots`/`locale`/`sessions`/`uiWorkspace`
 - Node `^22.19.0 || >=24.0.0`
-- peer `@deepseek-ai/cordis ~4.0.5-alpha.1`；`@deepseek-ai/dsh-agent`、`@deepseek-ai/dsh-host-webserver`、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-workspace` 为可选 peer（都声明为 `^0.2.1-rc.2`）
+- peer `@deepseek-ai/cordis ~4.0.6-alpha.1`；`@deepseek-ai/dsh-agent`、`@deepseek-ai/dsh-host-webserver`、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-workspace` 为可选 peer（都声明为 `^0.2.2-alpha.2`）
 - 会话树的位置由 `DSH_HOME` 决定；插件的 `sessionsRoot()` 与宿主解析规则一致
 
 ## 已知限制

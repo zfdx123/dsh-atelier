@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const packagesDir = path.join(root, 'packages')
 /** The plugins release in lockstep. */
-const PLUGIN_VERSION = '1.0.15'
+const PLUGIN_VERSION = '1.0.16'
 /**
  * The aggregator versions on its own: it only carries the bundle composition, so
  * changing which plugins are in the set must not force a republish of plugins
@@ -25,40 +25,45 @@ const PLUGIN_VERSION = '1.0.15'
 const AGGREGATOR = 'dsh-atelier'
 const EXCLUDED = new Set(['dsh-opencode-go'])
 /**
- * 声明支持的 DSH 运行时，**逐条显式**列出。当前只支持 `0.2.1-rc.2`（1.0.14 起
- * 收窄：`0.1.7-rc.2` / `0.2.0-rc.*` / `0.2.1-alpha.*` 都不再被接纳）。
+ * 声明支持的 DSH 运行时，**逐条显式**列出。当前只支持 `0.2.2-alpha.2`（1.0.16 起
+ * 收窄：`0.1.7-rc.2` / `0.2.0-rc.*` / `0.2.1-alpha.*` / `0.2.1-rc.*` 都不再被接纳）。
  *
- * caret 带 prerelease 时上界是 `<X.Y.Z-0`，所以跨元组的 prerelease 收不进来：
- * `^0.2.0-rc.1` 挡掉 `0.2.1-alpha.*`（`0.2.1-alpha.1 > 0.2.1-0`，而数字标识符 `0`
- * 小于字母数字标识符 `alpha`）。要同时支持两个元组就得写 `a || b`，两条 caret 缺一不可。
+ * 严格 semver 对 prerelease 的规则：带 prerelease 的**候选**只能被「元组相同且自带
+ * prerelease」的比较器接纳。`^0.2.2-alpha.2` 展开成 `>=0.2.2-alpha.2 <0.3.0-0`
+ * （0.x 的 caret 上界落在下一个 minor），于是它严格收下 `0.2.2-alpha.2` /
+ * `0.2.2-alpha.3` / `0.2.2` / `0.2.3`，却**不收** `0.2.3-alpha.1`（元组 0.2.3
+ * 没有带 prerelease 的比较器）与 `0.2.1-rc.2`（低于下界）。要同时支持两个元组就得
+ * 写 `a || b`，两条 caret 缺一不可。
  *
- * 安装期闸门在 `@deepseek-ai/dsh-app-boot`。**0.2.1-rc.2 起它的判定顺序变了**：
- * `evaluatePluginCompatibility` 现在**先看 `engines.dsh`——有它就只用它、peer 全部忽略**；
- * 只有 manifest 里没有 `engines.dsh` 时才回退去逐个扫 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*`
- * 的 peer。本仓库每个包都声明了 `engines.dsh`，所以决定「能不能装」的就是下面这一条 caret。
- * 判定本身仍是 `semver.satisfies(v, range, { includePrerelease: true })`，会把跨元组的
- * prerelease 也放进来——实测 `satisfies('0.2.1-alpha.1', '^0.2.0-rc.1', { includePrerelease: true })
- * === true`，而**严格** semver（不带该选项，npm 解析走的路径）是 false。所以「只支持一个运行时」
- * 靠的是这里把范围收窄成**恰好一条该运行时的 caret**，而不是指望闸门替我们挡住。
+ * 安装期闸门在 `@deepseek-ai/dsh-app-boot`。`evaluatePluginCompatibility` 在
+ * 0.2.1-rc.2 改成**先看 `engines.dsh`——有它就只用它、peer 全部忽略**，0.2.2-alpha.2
+ * 里该函数**逐字节未变**（实测 8/8 manifest 放行 + 3 条阳性对照被拒）。本仓库每个包
+ * 都声明了 `engines.dsh`，所以决定「能不能装」的就是下面这一条 caret。判定本身是
+ * `semver.satisfies(v, range, { includePrerelease: true })`，比严格 semver 宽——实测
+ * `satisfies('0.2.2-alpha.2', '^0.2.1-rc.2', { includePrerelease: true }) === true`
+ * （旧范围也认新运行时），严格口径则是 false。「只支持一个运行时」靠的是这里把范围
+ * 收窄成**恰好一条该运行时的 caret**，而不是指望闸门替我们挡住；反方向是硬的：
+ * `satisfies('0.2.1-rc.2', '^0.2.2-alpha.2', { includePrerelease: true }) === false`。
  *
  * 这里不重实现 semver：只强制「每个受支持的运行时都有一条显式 caret」，把范围漂移变成
  * 一次刻意修改。真正的 satisfies 判定由 DSH 自己的闸门与隔离 profile 实装核对负责。
  */
-const SUPPORTED_DSH = ['^0.2.1-rc.2']
+const SUPPORTED_DSH = ['^0.2.2-alpha.2']
 /**
  * 宿主运行时提供的 cordis 版本范围，**照抄 DSH 自己的声明**。
  *
- * 0.2.1-alpha.1 / alpha.2 树里每个 `@deepseek-ai/dsh-*` 包都写 `peerDependencies["@deepseek-ai/cordis"]
- * = "~4.0.5-alpha.1"`（0.2.0-rc.2 时是 `~4.0.4`）。0.2.1-rc.2 把 cordis 转正成 `4.0.5`、声明写成
- * `~4.0.5`——下面这条 `~4.0.5-alpha.1` **仍然收得下 4.0.5**（实测 `satisfies('4.0.5',
- * '~4.0.5-alpha.1') === true`：prerelease 排除只作用于带 prerelease 的**版本**，稳定版不受影响），
- * 所以不用跟着改；改窄反而会挡掉还没转正的那棵树。
- * 我们的插件跑在宿主的 cordis 里，范围写旧了不是「宽松一点」而是**装不上**：
- * 严格 semver 下 `^4.0.4` 不接纳 `4.0.5-alpha.1`（prerelease 只在元组相同的比较器下被接纳），
- * `npm install` 会以 ERESOLVE 失败——实测踩过（dsh-tools@0.2.1-alpha.1 要求 ~4.0.5-alpha.1，
- * 而我们的根声明还是 ^4.0.4）。所以这里把它钉成常量，范围漂移由闸门拦下。
+ * 0.2.2-alpha.2 树里每个 `@deepseek-ai/dsh-*` 包都写 `peerDependencies["@deepseek-ai/cordis"]
+ * = "~4.0.6-alpha.1"`、`@deepseek-ai/schemastery = "~3.18.6-alpha.1"`（0.2.1-rc.2 时是
+ * `~4.0.5` / `~3.18.5`）。基础包整体又前进了一组 prerelease：cordis 4.0.5 → 4.0.6-alpha.1、
+ * schemastery 3.18.5 → 3.18.6-alpha.1、cosmokit 1.8.6 → 1.8.7-alpha.1、cordis-plugin-* 同步。
+ * 下面这条 `~4.0.6-alpha.1` **必须**跟着写：`~4.0.5-alpha.1` 展开成
+ * `>=4.0.5-alpha.1 <4.1.0-0`，数值上 `4.0.6-alpha.1` 落在区间内，但严格 semver 只把带
+ * prerelease 的候选交给元组相同的比较器（4.0.5），所以实测 `satisfies('4.0.6-alpha.1',
+ * '~4.0.5-alpha.1') === false`——写旧了 `npm install` 直接 ERESOLVE（本轮首次刷新依赖时实测踩到）。
+ * 我们的插件跑在宿主的 cordis 里，peer 范围因此纯粹是兼容性契约：写宽写窄直接决定能不能装、
+ * 以及在哪个版本上被验证过；把它钉成常量，范围漂移由闸门拦下。
  */
-const SUPPORTED_CORDIS = '~4.0.5-alpha.1'
+const SUPPORTED_CORDIS = '~4.0.6-alpha.1'
 /** 把 `a || b` 拆成排序去重后的集合，用于比较。 */
 const rangeAlternatives = (range) => [
   ...new Set(
