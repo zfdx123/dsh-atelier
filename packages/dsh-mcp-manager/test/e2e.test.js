@@ -73,8 +73,9 @@ class FakeSettings extends Service {
   }
 
   /**
-   * 登记一个条目，引用取 Loader 真正交给插件的那一个（`fiber.config.servers`，
-   * 由 cordis 从**原始** config 解析出来的 volatile 引用）。
+   * 登记一个条目，引用取 Loader 真正交给插件的那一个（cordis 4.1 起解析后的
+   * config 在 `fiber.effectiveConfig`；`fiber.config` 只保留**原始**输入 ——
+   * 所以这里取的是 `effectiveConfig.servers` 这个 volatile 引用）。
    * @param {string} ns profile 条目 id
    * @param {object} ref volatile 引用
    */
@@ -257,9 +258,13 @@ function writeServersRef(ref, servers) {
  * 装配一个内存 harness。插件在这里就装载好，调用方拿 `disposer` 收尾。
  *
  * 关键：config 传的是**原始数组**（`{ servers }`），volatile 引用由 cordis 自己
- * 从原始 config 解析出来 —— 与 Loader 的真实行为一致。解析完成后把
- * `fiber.config.servers` 这个引用交给 FakeSettings，写入时才对同一个引用生效。
+ * 从原始 config 解析出来 —— 与 Loader 的真实行为一致。cordis 4.1 起解析结果在
+ * `fiber.effectiveConfig`（`fiber.config` 变回原始输入），所以登记的是
+ * `effectiveConfig.servers`，写入时才对同一个引用生效。
  */
+/** mcp-client 0.2.2-rc.2 的 execute 需要调用方提供 AbortSignal（它与 generation signal 做 AbortSignal.any）。 */
+const execContext = () => ({ signal: new AbortController().signal })
+
 function buildHarness({ withConnection = true, servers = [] } = {}) {
   const app = new Context()
   const settings = new FakeSettings(app)
@@ -280,8 +285,9 @@ function buildHarness({ withConnection = true, servers = [] } = {}) {
       await disposer.await()
       // 真实 harness 里 fiber.entry 由 loader 提供；这里补上同形的条目，
       // 让插件按条目 id 定位表单（0.1.7 契约）。
-      const ref = disposer.config.servers
-      if (!isVolatile(ref)) throw new Error('buildHarness: fiber.config.servers 应当是 volatile 引用')
+      const resolved = disposer.effectiveConfig ?? disposer.config
+      const ref = resolved.servers
+      if (!isVolatile(ref)) throw new Error('buildHarness: fiber.effectiveConfig.servers 应当是 volatile 引用')
       settings.adopt(TEST_ENTRY_ID, ref)
       return disposer
     },
@@ -534,7 +540,7 @@ describe('端到端：整条命令行粘进表单也能跑通（真实故障回�
     assert.ok(definition, '工具应注册')
 
     // 真正调用一次：子进程把收到的 argv 与脚本路径回传，证明拆分结果原样传下去了
-    const result = await definition.execute({ text: 'x' }, {})
+    const result = await definition.execute({ text: 'x' }, execContext())
     const texts = (result.content || []).map((part) => part.text || '')
     const argvLine = texts.find((text) => text.startsWith('argv='))
     const scriptLine = texts.find((text) => text.startsWith('script='))
@@ -629,7 +635,7 @@ describe('端到端：connection 服务后到（组合时序兜底）', () => {
     disposer = app.plugin(Manager, { servers: [], entryId: TEST_ENTRY_ID })
     await waitFor(() => webServer.routes.has('exact /api/mcp/servers'), { label: '兜底路由注册' })
     await disposer.await()
-    settings.adopt(TEST_ENTRY_ID, disposer.config.servers)
+    settings.adopt(TEST_ENTRY_ID, (disposer.effectiveConfig ?? disposer.config).servers)
     // connection 稍后才出现（装配顺序变化时就是这个形态）
     connection = new FakeConnection(app)
     app.effect(() => connection.mount(webServer), 'test: /api carrier')
@@ -865,7 +871,7 @@ describe('端到端：确认窗口的误判能被晚到证据翻案 + 会话失�
       },
     })
     const definition = harness.tools.defs.get('mcp__slow__plain')
-    await assert.rejects(() => definition.execute({}), /tool call timeout/)
+    await assert.rejects(() => definition.execute({}, execContext()), /tool call timeout/)
     const get = await request(base, 'GET')
     assert.equal(get.data.status.slow.state, 'ok', '业务错误不该把服务器状态改成别的')
   })
@@ -879,7 +885,7 @@ describe('端到端：确认窗口的误判能被晚到证据翻案 + 会话失�
     })
     const definition = harness.tools.defs.get('mcp__slow__boom')
     await assert.rejects(
-      () => definition.execute({}),
+      () => definition.execute({}, execContext()),
       /服务器 "slow" 的 MCP 会话已失效，已自动重新初始化，请重试本次调用/,
     )
     // 重挂进行中：卡片要立刻呈现「正在重新初始化」，而不是继续显示 ok。
@@ -912,7 +918,7 @@ describe('端到端：确认窗口的误判能被晚到证据翻案 + 会话失�
         },
       })
       try {
-        await harness.tools.defs.get(name).execute({})
+        await harness.tools.defs.get(name).execute({}, execContext())
         assert.fail('应当抛出会话失效的提示')
       } catch (error) {
         messages.push(error.message)

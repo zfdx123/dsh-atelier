@@ -35,6 +35,7 @@ describe('buildClientConfig 产出与 mcp-client Config schema 兼容', () => {
     assert.deepEqual(parsed.env, { A: '1' })
     assert.equal(parsed.cwd, '/tmp')
     assert.equal(parsed.toolCallTimeoutMs, 60000)
+    assert.equal(parsed.closeTimeoutMs, 5000)
     assert.equal(parsed.failOnStartupError, false)
   })
 
@@ -44,6 +45,7 @@ describe('buildClientConfig 产出与 mcp-client Config schema 兼容', () => {
     assert.equal(parsed.cwd, '')
     assert.deepEqual(parsed.args, [])
     assert.deepEqual(parsed.env, {})
+    assert.equal(parsed.closeTimeoutMs, 5000)
   })
 
   it('streamable-http 配置通过校验', () => {

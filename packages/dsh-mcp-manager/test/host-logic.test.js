@@ -236,6 +236,7 @@ describe('buildClientConfig（mcp-client 实例配置契约）', () => {
     })
     assert.deepEqual(Object.keys(config).sort(), [
       'args',
+      'closeTimeoutMs',
       'command',
       'cwd',
       'env',
@@ -312,6 +313,7 @@ describe('buildClientConfig（mcp-client 实例配置契约）', () => {
       cwd: '',
     })
     assert.deepEqual(Object.keys(config).sort(), [
+      'closeTimeoutMs',
       'failOnStartupError',
       'headers',
       'serverName',
@@ -364,6 +366,7 @@ describe('buildClientConfig（mcp-client 实例配置契约）', () => {
     assert.equal(legacy.reconnect, undefined)
     assert.deepEqual(Object.keys(legacy).sort(), [
       'args',
+      'closeTimeoutMs',
       'command',
       'env',
       'failOnStartupError',
@@ -492,7 +495,8 @@ describe('mcpClientLogToStatus（mcp-client 日志 → 挂载状态）', () => {
 
   it('无法确认关闭（终态）→ 翻译成「停止重连」', () => {
     // 0.1.7-rc.2 → 0.2.1-rc.2 各版 mcp-client 源码逐字节相同；0.2.2-alpha.2 只多了一处
-    // resources 能力守卫，tools 与生命周期文案未变，所以这条仍是唯一措辞。
+    // resources 能力守卫，0.2.2-rc.2 新增的是 credentials/deadline/status 等模块与配置
+    // 字段（tools 与生命周期文案未变），所以这条仍是唯一措辞。
     // 更早的 rc.8 措辞已不在受支持范围内（见下一条测试）。
     const update = mcpClientLogToStatus(
       log([

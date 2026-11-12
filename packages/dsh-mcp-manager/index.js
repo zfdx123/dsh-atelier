@@ -626,7 +626,8 @@ export function apply(ctx, config) {
   // 更早的 `settings/updated` 事件（0.1.6 及以前的契约，那时 `ns` 还是插件自取
   // 的命名空间）已删除：`dsh-settings` 的 `lib/index.js` 从 0.1.7-rc.2 到 0.2.1-rc.2
   // **逐字节相同**（rc.2 只在包里新增了 locale/*.json）；0.2.2-alpha.2 只有一处
-  // `fiber.config` → `fiber.effectiveConfig` 的表单投影改动，与这个事件无关。
+  // `fiber.config` → `fiber.effectiveConfig` 的表单投影改动，0.2.2-rc.2 又只改了表单
+  // 投影的 Fiber 身份（`owner` → `owner.ctx.fiber`），都与这个事件无关。
   // 这些版本都没有这个事件，留着它只服务我们已不声明的版本。
   const onConfigChanged = () => scheduleSync(readServers())
   ctx.on('loader/volatile-update', onConfigChanged)

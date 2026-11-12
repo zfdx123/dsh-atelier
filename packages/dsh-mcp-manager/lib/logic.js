@@ -12,13 +12,16 @@
 //
 //   stdio:           { transport: 'stdio', serverName, command,
 //                      args: string[] = [], env: dict = {}, cwd = '',
-//                      toolCallTimeoutMs = 60000, failOnStartupError = false,
-//                      maxInstructionBytes = 32768,
+//                      toolCallTimeoutMs = 60000, closeTimeoutMs = 5000,
+//                      startupTimeoutMs?: number, expandTemplates = false,
+//                      failOnStartupError = false, maxInstructionBytes = 32768,
 //                      reconnect?: { enabled = true, initialDelayMs = 500,
 //                                    maxDelayMs = 30000, maxAttempts = 10 } }
 //   streamable-http: { transport: 'streamable-http', serverName, url,
 //                      headers: dict = {}, toolCallTimeoutMs = 60000,
-//                      failOnStartupError = false, maxInstructionBytes = 32768,
+//                      closeTimeoutMs = 5000, startupTimeoutMs?: number,
+//                      expandTemplates = false, failOnStartupError = false,
+//                      maxInstructionBytes = 32768,
 //                      reconnect?: 同上 }
 //
 // 多余的键 schemastery 不会拒绝、也不会剥离（会原样保留），所以
@@ -93,12 +96,19 @@ export const ServersSchema = Schema.object({
 // toolCallTimeoutMs / failOnStartupError 是 0.2.1 起每个服务器可配置的项，
 // reconnect 是 0.3.0 起（对应 mcp-client 0.1.5 的 reconnect 配置）；缺省时
 // 回落 mcp-client 契约默认值（60000 / false / reconnect 默认开启 10 次）。
+// `dsh-mcp-client` 0.2.2-rc.2 起关闭连接受 `closeTimeoutMs` 截止（`withDeadline`），
+// 默认值只写在 loader 的 Config schema 里；本插件绕过 schema 直接调 `apply()`，
+// 缺省时 `Math.max(1, undefined)` 是 `NaN`、计时器按 0ms 触发，清理会被判成
+// 「did not settle」并脱离 await。显式给出与 mcp-client 默认值相同的 5000ms。
+export const MCP_CLIENT_CLOSE_TIMEOUT_MS = 5000
+
 export function buildClientConfig(server) {
   const config = {
     serverName: server.serverName,
     transport: server.transport,
     toolCallTimeoutMs:
       Number.isFinite(server.toolCallTimeoutMs) && server.toolCallTimeoutMs >= 1 ? server.toolCallTimeoutMs : 60000,
+    closeTimeoutMs: MCP_CLIENT_CLOSE_TIMEOUT_MS,
     failOnStartupError: server.failOnStartupError === true,
   }
   const reconnect = {}
@@ -305,7 +315,8 @@ export const MCP_LOG_RULES = [
     // 终态：settleFailedGeneration 直接 return，不再 scheduleReconnect。
     //
     // 只认现行措辞。0.1.7-rc.2 → 0.2.1-rc.2 各版 mcp-client 源码**逐字节相同**；0.2.2-alpha.2
-    // 只多了一处 resources 能力守卫（resources/* 两个分支），tools 与生命周期文案逐词未变，
+    // 只多了一处 resources 能力守卫（resources/* 两个分支），0.2.2-rc.2 新增的是 credentials /
+    // deadline / generation / status 等模块与配置字段（不改 tools 与生命周期文案），
     // 都是 `could not confirm transport closure`；更早的 rc.8 措辞
     // （`did not close within <ms>ms`）已不在受支持范围内，交给下面的未识别透传
     // 兜底——那同样会报成 error 并带上原文，不会变成「看起来正常」。
@@ -322,6 +333,32 @@ export const MCP_LOG_RULES = [
     name: '拆卸期关闭未确认',
     match: (content) => /during disposal/.test(content) && /transport closure could not be confirmed/.test(content),
     build: () => ({ state: 'error', message: '服务进程未在超时内退出（拆卸期）：可能留下残留进程', detail: true }),
+  },
+  {
+    // 0.2.2-rc.2 新增：注销工具时的清理失败（不影响既有工具，但要红）。
+    name: '工具清理失败',
+    match: (content) => content.startsWith('tool cleanup failed:'),
+    build: (content) => ({
+      state: 'error',
+      message: `工具注销失败：${after(content, 'tool cleanup failed:')}`,
+      detail: true,
+    }),
+  },
+  {
+    // 0.2.2-rc.2 新增：后台刷新凭据失败（模板展开开启时才会出现）。
+    name: '凭据刷新失败',
+    match: (content) => content.startsWith('credential refresh failed:'),
+    build: (content) => ({
+      state: 'error',
+      message: `凭据刷新失败：${after(content, 'credential refresh failed:')}`,
+      detail: true,
+    }),
+  },
+  {
+    // 0.2.2-rc.2 新增：连接清理未完成——mcp-client 会拒绝在同一 fiber 上再建实例。
+    name: '清理未完成',
+    match: (content) => content === 'cleanup incomplete',
+    build: () => ({ state: 'error', message: '连接清理未完成：需重启 Host 才能彻底释放', detail: false }),
   },
 ]
 

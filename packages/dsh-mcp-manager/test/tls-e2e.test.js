@@ -50,7 +50,7 @@ class FakeSettings extends Service {
 
   /**
    * 登记一个条目，引用取 Loader 真正交给插件的那一个
-   * （`fiber.config.servers`，由 cordis 从**原始** config 解析出来的引用）。
+   * （cordis 4.1 起在 `fiber.effectiveConfig.servers`；`fiber.config` 是原始输入）。
    */
   adopt(ns, ref) {
     this.entries.set(ns, { ns, document: ref.get(), revision: 0, ref })
@@ -205,7 +205,7 @@ describe('端到端：自签名 HTTPS MCP 服务器（tlsInsecure 定向生效�
     disposer = app.plugin(Manager, { servers: [], entryId: TEST_ENTRY_ID })
     // 让插件的 apply 跑完（路由注册 + 启动同步）
     await disposer.await()
-    settings.adopt(TEST_ENTRY_ID, disposer.config.servers)
+    settings.adopt(TEST_ENTRY_ID, (disposer.effectiveConfig ?? disposer.config).servers)
   })
 
   after(async () => {

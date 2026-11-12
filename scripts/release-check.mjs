@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const packagesDir = path.join(root, 'packages')
 /** The plugins release in lockstep. */
-const PLUGIN_VERSION = '1.0.16'
+const PLUGIN_VERSION = '1.0.17'
 /**
  * The aggregator versions on its own: it only carries the bundle composition, so
  * changing which plugins are in the set must not force a republish of plugins
@@ -25,45 +25,44 @@ const PLUGIN_VERSION = '1.0.16'
 const AGGREGATOR = 'dsh-atelier'
 const EXCLUDED = new Set(['dsh-opencode-go'])
 /**
- * 声明支持的 DSH 运行时，**逐条显式**列出。当前只支持 `0.2.2-alpha.2`（1.0.16 起
+ * 声明支持的 DSH 运行时，**逐条显式**列出。当前只支持 `0.2.2-rc.2`（1.0.17 起
  * 收窄：`0.1.7-rc.2` / `0.2.0-rc.*` / `0.2.1-alpha.*` / `0.2.1-rc.*` 都不再被接纳）。
  *
  * 严格 semver 对 prerelease 的规则：带 prerelease 的**候选**只能被「元组相同且自带
- * prerelease」的比较器接纳。`^0.2.2-alpha.2` 展开成 `>=0.2.2-alpha.2 <0.3.0-0`
- * （0.x 的 caret 上界落在下一个 minor），于是它严格收下 `0.2.2-alpha.2` /
- * `0.2.2-alpha.3` / `0.2.2` / `0.2.3`，却**不收** `0.2.3-alpha.1`（元组 0.2.3
+ * prerelease」的比较器接纳。`^0.2.2-rc.2` 展开成 `>=0.2.2-rc.2 <0.3.0-0`
+ * （0.x 的 caret 上界落在下一个 minor），于是它严格收下 `0.2.2-rc.2` /
+ * `0.2.2` / `0.2.3`，却**不收** `0.2.3-alpha.1`（元组 0.2.3
  * 没有带 prerelease 的比较器）与 `0.2.1-rc.2`（低于下界）。要同时支持两个元组就得
  * 写 `a || b`，两条 caret 缺一不可。
  *
  * 安装期闸门在 `@deepseek-ai/dsh-app-boot`。`evaluatePluginCompatibility` 在
- * 0.2.1-rc.2 改成**先看 `engines.dsh`——有它就只用它、peer 全部忽略**，0.2.2-alpha.2
+ * 0.2.1-rc.2 改成**先看 `engines.dsh`——有它就只用它、peer 全部忽略**，0.2.2-rc.2
  * 里该函数**逐字节未变**（实测 8/8 manifest 放行 + 3 条阳性对照被拒）。本仓库每个包
  * 都声明了 `engines.dsh`，所以决定「能不能装」的就是下面这一条 caret。判定本身是
  * `semver.satisfies(v, range, { includePrerelease: true })`，比严格 semver 宽——实测
- * `satisfies('0.2.2-alpha.2', '^0.2.1-rc.2', { includePrerelease: true }) === true`
+ * `satisfies('0.2.2-rc.2', '^0.2.1-rc.2', { includePrerelease: true }) === true`
  * （旧范围也认新运行时），严格口径则是 false。「只支持一个运行时」靠的是这里把范围
  * 收窄成**恰好一条该运行时的 caret**，而不是指望闸门替我们挡住；反方向是硬的：
- * `satisfies('0.2.1-rc.2', '^0.2.2-alpha.2', { includePrerelease: true }) === false`。
+ * `satisfies('0.2.1-rc.2', '^0.2.2-rc.2', { includePrerelease: true }) === false`。
  *
  * 这里不重实现 semver：只强制「每个受支持的运行时都有一条显式 caret」，把范围漂移变成
  * 一次刻意修改。真正的 satisfies 判定由 DSH 自己的闸门与隔离 profile 实装核对负责。
  */
-const SUPPORTED_DSH = ['^0.2.2-alpha.2']
+const SUPPORTED_DSH = ['^0.2.2-rc.2']
 /**
  * 宿主运行时提供的 cordis 版本范围，**照抄 DSH 自己的声明**。
  *
- * 0.2.2-alpha.2 树里每个 `@deepseek-ai/dsh-*` 包都写 `peerDependencies["@deepseek-ai/cordis"]
- * = "~4.0.6-alpha.1"`、`@deepseek-ai/schemastery = "~3.18.6-alpha.1"`（0.2.1-rc.2 时是
- * `~4.0.5` / `~3.18.5`）。基础包整体又前进了一组 prerelease：cordis 4.0.5 → 4.0.6-alpha.1、
- * schemastery 3.18.5 → 3.18.6-alpha.1、cosmokit 1.8.6 → 1.8.7-alpha.1、cordis-plugin-* 同步。
- * 下面这条 `~4.0.6-alpha.1` **必须**跟着写：`~4.0.5-alpha.1` 展开成
- * `>=4.0.5-alpha.1 <4.1.0-0`，数值上 `4.0.6-alpha.1` 落在区间内，但严格 semver 只把带
- * prerelease 的候选交给元组相同的比较器（4.0.5），所以实测 `satisfies('4.0.6-alpha.1',
- * '~4.0.5-alpha.1') === false`——写旧了 `npm install` 直接 ERESOLVE（本轮首次刷新依赖时实测踩到）。
+ * 0.2.2-rc.2 树里每个 `@deepseek-ai/dsh-*` 包都写 `peerDependencies["@deepseek-ai/cordis"]
+ * = "~4.1.0"`、`@deepseek-ai/schemastery = "~3.19.0"`（0.2.2-rc.2 时是 ~4.1.0 /
+ * ~3.19.0）。这一轮基础包**全部转正**：cordis 4.0.6-alpha.1 → 4.1.0、schemastery
+ * 3.19.0 → 3.19.0、cosmokit 1.8.7-alpha.1 → 1.9.0、cordis-plugin-* 同步。
+ * 下面这条 `~4.1.0` **必须**跟着写：旧的 `~4.1.0` 展开成 `<4.1.0-0`，数值上恰好把
+ * 4.1.0 挡在门外（实测 `satisfies('4.1.0', '~4.1.0') === false`）——写旧了
+ * `npm install` 直接 ERESOLVE（本轮刷新依赖时实测踩到）。
  * 我们的插件跑在宿主的 cordis 里，peer 范围因此纯粹是兼容性契约：写宽写窄直接决定能不能装、
  * 以及在哪个版本上被验证过；把它钉成常量，范围漂移由闸门拦下。
  */
-const SUPPORTED_CORDIS = '~4.0.6-alpha.1'
+const SUPPORTED_CORDIS = '~4.1.0'
 /** 把 `a || b` 拆成排序去重后的集合，用于比较。 */
 const rangeAlternatives = (range) => [
   ...new Set(
