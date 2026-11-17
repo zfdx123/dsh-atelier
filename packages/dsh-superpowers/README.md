@@ -59,9 +59,9 @@ dsh --profile web --dump-config
 
 ## 前置要求
 
-- DeepSeek Harness `^0.2.2-rc.2`（`engines.dsh`）
+- DeepSeek Harness `^0.2.2-rc.3`（`engines.dsh`）
 - Node `^22.19.0 || >=24.0.0`
-- peer `@deepseek-ai/cordis ~4.1.0`，以及可选的 peer `@deepseek-ai/dsh-skill`、`@deepseek-ai/dsh-system-prompt`（均为 `^0.2.2-rc.2`）
+- peer `@deepseek-ai/cordis ~4.1.0`，以及可选的 peer `@deepseek-ai/dsh-skill`、`@deepseek-ai/dsh-system-prompt`（均为 `^0.2.2-rc.3`）
 - 一个运行时依赖 `@deepseek-ai/schemastery`（提供配置 schema）：从 registry 安装会自动带上；用 `link:` 安装需要先在检出目录执行 `npm install`，否则插件加载失败
 
 ## 已知限制
