@@ -57,7 +57,7 @@ import {
   SESSION_RECOVERING_MESSAGE,
 } from './lib/logic.js'
 import { API_PATH, createApiHandler, isLoopbackRequest, readNodeBody } from './lib/api.js'
-import { claimEntry, declaredKeys } from './lib/claim.js'
+import { claimEntry, declaredKeys, matchingEntries } from './lib/claim.js'
 import { createTlsBridge, describeErrorChain } from './lib/tls.js'
 import { normalizeStdioServer, preflightStdioServer } from './lib/stdio.js'
 
@@ -153,18 +153,32 @@ export function apply(ctx, config) {
    *
    * @returns {{ns: string, value: object|undefined, revision: unknown, claimed: boolean}}
    */
+  /**
+   * 本插件设置条目的值形状：`servers` 必须是**数组**。
+   *
+   * 0.2.2-rc.2 起 `@deepseek-ai/dsh-web-app` 自带官方 mcp-manager，它的 Config 同样是
+   * `{ servers }`，但 servers 是**记录**（`z.dict(...)`，默认 `{}`）。只按键名认领时
+   * 两个条目互为歧义 → 写入路径报「没有可写入的配置表单」。值形状是唯一稳定的区分：
+   * 本插件是 `Schema.array(...)`，官方是 dict。
+   *
+   * @param {object} value 设置条目的值
+   * @returns {boolean} 是否可能是本插件的条目
+   */
+  const isOwnEntryValue = (value) => Array.isArray(value.servers)
+
   const resolveEntry = () => {
-    if (typeof ctx.settings?.describe === 'function') {
-      const descriptor = claimEntry(ctx.settings.describe(), DECLARED_KEYS)
-      if (descriptor !== undefined) {
-        claimedNs = descriptor.ns
-        return { ns: descriptor.ns, value: descriptor.value, revision: descriptor.revision, claimed: true }
-      }
+    const describe = typeof ctx.settings?.describe === 'function' ? ctx.settings.describe() : undefined
+    const own = claimEntry(describe, DECLARED_KEYS, isOwnEntryValue)
+    if (own !== undefined) {
+      claimedNs = own.ns
+      return { ns: own.ns, value: own.value, revision: own.revision, claimed: true, candidates: [] }
     }
     // 认领不到只可能是非 loader 载体（测试的内存 cordis）或宿主还没登记条目。
     // `config.entryId` 只在这条兜底路径上有意义——**它不是生产路径**。
     const fallback = typeof config?.entryId === 'string' && config.entryId !== '' ? config.entryId : undefined
-    return { ns: claimedNs ?? fallback, value: undefined, revision: undefined, claimed: false }
+    // 诊断用：按键名（不按形状）还剩哪些候选——歧义与「压根没有」要能区分开。
+    const candidates = matchingEntries(describe, DECLARED_KEYS).map((entry) => entry.ns)
+    return { ns: claimedNs ?? fallback, value: undefined, revision: undefined, claimed: false, candidates }
   }
 
   /** 认领到的条目名；写入前重新认领，因为它会随重挂载变化。 */
@@ -653,8 +667,13 @@ export function apply(ctx, config) {
         // （根下 ↔ include 分组下），缓存一个名字去写就是原来那个被宿主拒绝的 bug。
         const entry = resolveEntry()
         if (entry.ns === null || entry.ns === undefined || typeof replace !== 'function') {
+          const why = typeof replace !== 'function'
+            ? '宿主没有提供 ctx.settings.replace'
+            : entry.candidates.length > 0
+              ? `认领到多个候选设置条目（${entry.candidates.join(' / ')}），无法确定哪一个属于本插件`
+              : '宿主没有暴露本插件的设置条目'
           throw new Error(
-            '当前宿主没有可写入的配置表单（settings.replace 不可用）：请在 profile 条目的 config 里直接编辑本插件的 servers。',
+            `当前宿主没有可写入的配置表单：${why}。请在 profile 条目的 config 里直接编辑本插件的 servers。`,
           )
         }
         await replace.call(ctx.settings, entry.ns, { servers }, rev)

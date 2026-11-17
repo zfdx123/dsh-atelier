@@ -1,18 +1,26 @@
 # dsh-mcp-manager bundle patch：单独安装本包时，在组合树中插入管理器行。
 #
-# 两份 patch 二选一（见 @zfdx123/dsh-atelier 的 patch 头注释）：
-#   装入口包 -> 用入口包那份，id 是 `dsh-mcp-manager`
-#   单装本包 -> 用下面这份，id 是 `mcp-manager`（就是你在 dump-config 里看到的行 id）
-# 两个 id 不同，**都正常**：设置条目的名字（ns）就是行 id，而插件从不按名字找自己的
-# 设置条目，而是按值形状认领（见 lib/claim.js）。改 id 不会把「保存」弄坏。
+# **id 必须全局唯一**：DSH 0.2.2-rc.2 起 `@deepseek-ai/dsh-web-app` 自带官方
+# mcp-manager，它的 loader 条目 id 正是 `mcp-manager`。旧版本包单独安装时也用
+# `mcp-manager`，两个同 id 的行会被组合器合并，设置保存会被 config-editor 拒绝：
+#
+#   Configuration for "mcp-manager" is overridden by a home patch or command-line overlay
+#
+# 所以这里与入口包统一用 `dsh-mcp-manager`（与官方行区分开）。
+# 设置条目的名字（ns）就是行 id，插件从不按名字找自己的条目，而是按值形状认领
+# （见 lib/claim.js：本插件的 servers 是数组，官方的是记录）。
 # 被放进 `include` 分组时运行时的 id 还会带上组前缀（`include:dsh-mcp-manager`）。
+#
+# 升级提示：若你在旧版**单独**安装过本包，profile 的 cordis.patch.yml 里可能残留
+# `- id: mcp-manager` 的配置；升级后请把它改成 `- id: dsh-mcp-manager`（或删掉，
+# 在设置页重填）——否则那段 config 会落到官方 manager 的条目上。
 #
 # 挂载 @deepseek-ai/dsh-mcp-client 实例，并在设置页注册「MCP 服务器」配置界面。
 # 配置持久化在 settings.yaml，改动即时热生效。
 #
 # 用户可以在自己的 profile cordis.patch.yml 里按 id 覆盖本行
-# （例如禁用：- id: mcp-manager  disabled: true —— 用 dump-config 里那一行的 id）。
+# （例如禁用：- id: dsh-mcp-manager  disabled: true —— 用 dump-config 里那一行的 id）。
 # name 是 npm 包名（scoped 版；无 scope 的 dsh-mcp-manager 已被他人占用）。
 - insert:
-    - id: mcp-manager
+    - id: dsh-mcp-manager
       name: '@zfdx123/dsh-mcp-manager'

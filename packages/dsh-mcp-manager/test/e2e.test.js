@@ -86,7 +86,7 @@ class FakeSettings extends Service {
     return [...this.entries.values()].map((entry) => ({
       ns: entry.ns,
       schema: entry.schema,
-      value: entry.document,
+      value: { servers: entry.document },
       revision: entry.revision,
       autoGenerate: true,
       applies: 'live',
@@ -802,6 +802,45 @@ describe('端到端：修订号乐观锁（0.1.7 表单按 loader 条目 id 定�
       servers: [...get.data.servers, STDIO('renamed2')],
     })
     assert.equal(status, 200)
+  })
+})
+
+describe('端到端：官方 @deepseek-ai/dsh-mcp-manager 同时在册时仍写自己的条目', () => {
+  let harness
+  let base
+  let disposer
+
+  before(async () => {
+    harness = buildHarness()
+    disposer = harness.disposer
+    await harness.ready()
+    base = `http://127.0.0.1:${await harness.webServer.listen()}/api/mcp/servers`
+    // 0.2.2-rc.2 的 @deepseek-ai/dsh-web-app 会挂一个官方 mcp-manager：它的设置条目
+    // 值同样是 { servers }，但 servers 是记录。复现「两个形状相近的条目同时在册」。
+    harness.settings.entries.set('official-mcp-manager', {
+      ns: 'official-mcp-manager',
+      document: { servers: {} },
+      revision: 0,
+      ref: { get: () => ({ servers: {} }) },
+    })
+  })
+
+  after(async () => {
+    await harness.webServer.close()
+    await disposer.dispose()
+  })
+
+  it('POST 成功，且只写本插件自己的条目（不碰官方条目）', async () => {
+    const { status, data } = await request(base, 'POST', { servers: [STDIO('collide')] })
+    assert.equal(status, 200, `POST 应成功，实际 ${status}: ${JSON.stringify(data)}`)
+    const ours = harness.settings.entries.get(TEST_ENTRY_ID).document.servers
+    assert.equal(ours.length, 1, `本插件条目应收到 1 台服务器，实际 ${JSON.stringify(ours)}`)
+    assert.equal(ours[0].serverName, 'collide')
+    assert.deepEqual(
+      harness.settings.entries.get('official-mcp-manager').document.servers,
+      {},
+      '官方 mcp-manager 的 servers 记录不能被写入本插件的数组',
+    )
   })
 })
 

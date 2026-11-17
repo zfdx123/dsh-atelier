@@ -29,21 +29,19 @@ export function declaredKeys(schema) {
 }
 
 /**
- * 从条目列表里认出本插件的条目。
+ * 按键名筛出「看起来像本插件」的条目（不做唯一性判断）。
  *
- * 判据：值是非空普通对象，键**全部**落在 `declared` 里。
- * 只判「键都在我声明的集合里」不够——一个空对象能匹配任何 schema，所以要求至少
- * 一个键；再靠下面的一致性检查排除「恰好形状相同的别人」。
- *
- * **一致性**：候选必须只有唯一一个。多个候选时返回 undefined——宁可报「认不出」
- * 也不赌一个名字写上去（写错 ns 会被宿主拒绝，而且错得很晚）。
+ * 判据：值是非空普通对象，键**全部**落在 `declared` 里。只判键名不够——一个空对象
+ * 能匹配任何 schema，所以要求至少一个键；调用方还可以用 `matches` 再按**值形状**
+ * 收窄（例如本插件的 `servers` 是数组，官方 mcp-manager 的同名字段是记录）。
  *
  * @param {Array<{ns: string, value?: unknown}>} list describe() 返回的条目
  * @param {Set<string>} declared 本插件声明的字段名
- * @returns {{ns: string, value: object, revision?: unknown} | undefined} 本插件的条目
+ * @param {(value: object, entry: object) => boolean} [matches] 额外的值形状谓词
+ * @returns {Array<{ns: string, value: object, revision?: unknown}>} 候选条目
  */
-export function claimEntry(list, declared) {
-  if (!Array.isArray(list) || !(declared instanceof Set) || declared.size === 0) return undefined
+export function matchingEntries(list, declared, matches) {
+  if (!Array.isArray(list) || !(declared instanceof Set) || declared.size === 0) return []
   /** @type {Array<{ns: string, value: object, revision?: unknown}>} */
   const candidates = []
   for (const entry of list) {
@@ -60,7 +58,24 @@ export function claimEntry(list, declared) {
       }
     }
     if (foreign) continue
+    if (typeof matches === 'function' && !matches(value, entry)) continue
     candidates.push(entry)
   }
+  return candidates
+}
+
+/**
+ * 从条目列表里认出本插件的条目。
+ *
+ * **一致性**：候选必须只有唯一一个。多个候选时返回 undefined——宁可报「认不出」
+ * 也不赌一个名字写上去（写错 ns 会被宿主拒绝，而且错得很晚）。
+ *
+ * @param {Array<{ns: string, value?: unknown}>} list describe() 返回的条目
+ * @param {Set<string>} declared 本插件声明的字段名
+ * @param {(value: object, entry: object) => boolean} [matches] 额外的值形状谓词（见 {@link matchingEntries}）
+ * @returns {{ns: string, value: object, revision?: unknown} | undefined} 本插件的条目
+ */
+export function claimEntry(list, declared, matches) {
+  const candidates = matchingEntries(list, declared, matches)
   return candidates.length === 1 ? candidates[0] : undefined
 }

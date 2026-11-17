@@ -137,6 +137,19 @@ describe('配置契约文档与 engines 声明跟着上游事实走', () => {
     assert.equal(Number(documented[1]), parsed.maxInstructionBytes)
   })
 
+  it('bundle patch 的 loader 条目 id 与官方 mcp-manager 区分开', () => {
+    // 0.2.2-rc.2 起 @deepseek-ai/dsh-web-app 自带官方 mcp-manager，条目 id 就是
+    // `mcp-manager`；单独安装本包时若还用同一个 id，两行会被组合器合并，设置保存
+    // 直接被 config-editor 拒绝（overridden by a home patch…）。
+    const patch = readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
+    const ids = [...patch.matchAll(/^\s*-\s*id:\s*([A-Za-z0-9_-]+)\s*$/gm)].map((match) => match[1])
+    assert.deepEqual(
+      ids,
+      ['dsh-mcp-manager'],
+      `patch 里的 loader 条目 id 必须唯一且不等于官方的 mcp-manager，实际 ${JSON.stringify(ids)}`,
+    )
+  })
+
   it('engines.node 覆盖 undici 的实际下限', () => {
     // undici 是唯一带 Node 下限的运行时依赖（TLS 定向 dispatcher 用），
     // 它一旦抬高下限而 engines 没跟上，插件会在受支持的 Node 上装出一个跑不动的组合。

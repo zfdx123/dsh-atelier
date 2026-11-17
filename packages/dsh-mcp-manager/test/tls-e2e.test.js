@@ -58,7 +58,7 @@ class FakeSettings extends Service {
   describe() {
     return [...this.entries.values()].map((entry) => ({
       ns: entry.ns,
-      value: entry.document,
+      value: { servers: entry.document },
       revision: entry.revision,
       autoGenerate: true,
       applies: 'live',

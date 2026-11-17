@@ -76,6 +76,22 @@ test('claimEntry 拒绝认不出与有歧义的输入，绝不赌一个名字写
   )
 })
 
+test('claimEntry 用形状谓词排除官方 @deepseek-ai/dsh-mcp-manager 的 servers 记录', () => {
+  // 0.2.2-rc.2 起 @deepseek-ai/dsh-web-app 自带官方 mcp-manager：它的 Config 也是
+  // { servers }，但 servers 是 **记录**（默认 {}）；本插件的是 **数组**。只按键名认领
+  // 时两者互为歧义，写入路径会报「没有可写入的配置表单」。
+  const official = { ns: 'mcp-manager', value: { servers: {} } }
+  const ours = { ns: 'include:dsh-mcp-manager', value: { servers: [] } }
+  const isOurs = (value) => Array.isArray(value.servers)
+  assert.equal(claimEntry([official, ours], DECLARED, isOurs)?.ns, 'include:dsh-mcp-manager')
+  // 不带谓词时仍是歧义（保持原有的保守行为）
+  assert.equal(claimEntry([official, ours], DECLARED), undefined)
+  // 只剩官方条目时绝不误认
+  assert.equal(claimEntry([official], DECLARED, isOurs), undefined)
+  // 谓词不命中时等同没有候选
+  assert.equal(claimEntry([ours], DECLARED, () => false), undefined)
+})
+
 test('claimEntry 不会把 skills-manager 的条目误当自己的', () => {
   const list = [{ ns: 'include:dsh-skills-manager', value: { customSkillDirs: [] } }]
   assert.equal(claimEntry(list, DECLARED), undefined)
