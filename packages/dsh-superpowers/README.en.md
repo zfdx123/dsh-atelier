@@ -59,9 +59,9 @@ Every field is validated against the plugin's own schema (`@deepseek-ai/schemast
 
 ## Requirements
 
-- DeepSeek Harness `^0.2.2-rc.3` (`engines.dsh`)
+- DeepSeek Harness `^0.2.2-rc.5` (`engines.dsh`)
 - Node `^22.19.0 || >=24.0.0`
-- The peer `@deepseek-ai/cordis ~4.1.0`, plus the optional peers `@deepseek-ai/dsh-skill` and `@deepseek-ai/dsh-system-prompt` (both `^0.2.2-rc.3`)
+- The peer `@deepseek-ai/cordis ~4.1.0`, plus the optional peers `@deepseek-ai/dsh-skill` and `@deepseek-ai/dsh-system-prompt` (both `^0.2.2-rc.5`)
 - One runtime dependency, `@deepseek-ai/schemastery` (the config schema): a registry install pulls it in, while a `link:` install needs `npm install` in the checkout first or the plugin fails to load
 
 ## Limitations

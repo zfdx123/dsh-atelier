@@ -201,9 +201,9 @@ mcp:
 | 组件 | 版本要求 |
 |---|---|
 | Node | **`^22.19.0 \|\| >=24.0.0`**（`undici` 8.x 的下限是 22.19.0；`@deepseek-ai/dsh-mcp-client` 依赖 `Promise.withResolvers`） |
-| DSH | **`^0.2.2-rc.3`**（`engines.dsh` 与 peer 范围。本包在 1.0.5 那一版按 `0.1.7-rc.2` 的设置 API 重写过；1.0.18 起收窄到这一条，已实测；`0.1.7-rc.2` / `0.2.0-rc.*` / `0.2.1-alpha.*` / `0.2.1-rc.*` 与更早的 `0.1.5` / `0.1.6-alpha.*` 都只是历史校对记录） |
-| `@deepseek-ai/dsh-mcp-client` | `^0.2.2-rc.3`（peerDependency，由运行时提供；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
-| `@deepseek-ai/dsh-settings` | `^0.2.2-rc.3`（peerDependency，可选：`ctx.settings` 由宿主提供） |
+| DSH | **`^0.2.2-rc.5`**（`engines.dsh` 与 peer 范围。本包在 1.0.5 那一版按 `0.1.7-rc.2` 的设置 API 重写过；1.0.19 起收窄到这一条，已实测；`0.1.7-rc.2` / `0.2.0-rc.*` / `0.2.1-alpha.*` / `0.2.1-rc.*` 与更早的 `0.1.5` / `0.1.6-alpha.*` 都只是历史校对记录） |
+| `@deepseek-ai/dsh-mcp-client` | `^0.2.2-rc.5`（peerDependency，由运行时提供；`reconnect` 配置从 0.1.5 起可选，`maxInstructionBytes` 从 0.1.6 起可选、默认 32768） |
+| `@deepseek-ai/dsh-settings` | `^0.2.2-rc.5`（peerDependency，可选：`ctx.settings` 由宿主提供） |
 | `@deepseek-ai/cordis` | `~4.1.0`（peerDependency；照抄 DSH 自己的声明。0.2.2-rc.2 把 cordis 从 `4.0.5` 推到 `4.0.6-alpha.1`，范围写旧了 `npm install` 直接 ERESOLVE） |
 | `dsh` CLI + pnpm | `dsh plugin` 命令转发给 pnpm；本包按 profile 的 pnpm 布局安装 |
 
@@ -257,24 +257,24 @@ mcp:
   MCP_LOG_CONTRACT_PRINT=1 node test/log-contract.test.js
   ```
 
-  同时把 `devDependencies` 的 `@deepseek-ai/dsh-mcp-client` 钉在**我们声明的**宿主版本（`^0.2.2-rc.3`），让本地测试与线上同源——测试跑的就是受支持的版本。
+  同时把 `devDependencies` 的 `@deepseek-ai/dsh-mcp-client` 钉在**我们声明的**宿主版本（`^0.2.2-rc.5`），让本地测试与线上同源——测试跑的就是受支持的版本。
 
 ### 兼容性
 
 | 组件 | 版本要求 |
 |---|---|
 | Node | **`^22.19.0 \|\| >=24.0.0`** |
-| DSH | **`0.2.2-rc.3`**（1.0.18 起只声明 `^0.2.2-rc.3` 这一条，已实测） |
-| `@deepseek-ai/dsh-mcp-client` | `^0.2.2-rc.3`（peerDependency；0.2.2-rc.2 新增 credentials/deadline/status 等模块与 `closeTimeoutMs` 等配置字段，见下） |
-| `@deepseek-ai/dsh-settings` | `^0.2.2-rc.3`（peerDependency；表单投影只改了 Fiber 身份，`describe` / `mutate` 形状不变） |
+| DSH | **`0.2.2-rc.5`**（1.0.19 起只声明 `^0.2.2-rc.5` 这一条，已实测） |
+| `@deepseek-ai/dsh-mcp-client` | `^0.2.2-rc.5`（peerDependency；0.2.2-rc.2 新增 credentials/deadline/status 等模块与 `closeTimeoutMs` 等配置字段，见下） |
+| `@deepseek-ai/dsh-settings` | `^0.2.2-rc.5`（peerDependency；表单投影只改了 Fiber 身份，`describe` / `mutate` 形状不变） |
 | `@deepseek-ai/cordis` | `~4.1.0` |
 
-### 为什么只声明 0.2.2-rc.3
+### 为什么只声明 0.2.2-rc.5
 
 本包声明**只支持一个运行时**，理由是这个运行时是唯一被实测过的版本，而 semver 的 prerelease
 规则让「同时声明几个元组」必须写成 `a || b` 而不是一条 caret——多声明的每一版都得自己跑一遍核对。
 
-`0.2.2-rc.2` 这一轮（`0.2.2-rc.3` 基础包与 mcp-client 均未变），本包直接调用 `dsh-mcp-client` 的 `apply()`（不经过 loader 的 Config
+`0.2.2-rc.2` 这一轮（`0.2.2-rc.3` ～ `0.2.2-rc.5` 基础包与 mcp-client 均未变），本包直接调用 `dsh-mcp-client` 的 `apply()`（不经过 loader 的 Config
 归一化），所以它新增的配置字段会**直达**我们：
 
 - `dsh-mcp-client` 新增 `credentials` / `deadline` / `diagnostic` / `generation` / `probe` /
@@ -310,7 +310,7 @@ mcp:
   判定本身**比严格 semver 宽**：`satisfies('0.2.2-rc.2', '^0.2.1-rc.2', { includePrerelease: true })
   === true`（旧范围也认新运行时），而 npm 解析用的严格 semver 是 `false`。所以「只支持一版」是
   **我们**把范围收窄成恰好一条的结果，不是闸门替我们挡住的；反方向是硬的：
-  `satisfies('0.2.1-rc.2', '^0.2.2-rc.3', { includePrerelease: true }) === false`。
+  `satisfies('0.2.1-rc.2', '^0.2.2-rc.5', { includePrerelease: true }) === false`。
   范围写错了（如把 cordis 留在 `^4.0.4`）也是**装都装不上**。
 - 宿主的根 Include 会把裸包名（非 `.`/`cordis:` 开头）用**宿主自己的安装位置**解析
   （`dsh-app-boot` 的 `HostResolvedRootInclude`），所以插件运行时拿到的始终是宿主的
@@ -320,19 +320,32 @@ mcp:
 核对方式（可复现）：用隔离的 `DSH_HOME` 把本包（`file:` 规格，即工作区源码）装进目标版本的
 web profile，7 个包全部安装成功、`--dump-config` 里 7 行齐备、真启动到
 `dsh web: http://127.0.0.1:<port>/` 且无插件装载报错；本包的 `devDependencies` 钉在最新受支持版
-（`0.2.2-rc.3`），所以 `npm test` 跑的就是它（含全部单测与 E2E，本轮 298 项：296 通过 + 2 条 POSIX-only 跳过）。
+（`0.2.2-rc.5`），所以 `npm test` 跑的就是它（含全部单测与 E2E，本轮 298 项：296 通过 + 2 条 POSIX-only 跳过）。
 这套流程在 `0.2.0-rc.1` / `0.2.0-rc.2` / `0.2.1-alpha.1` / `0.2.1-alpha.2` / `0.2.1-rc.2` /
-`0.2.2-rc.2` 上各跑过一次，并配了**闸门阳性对照**——rc.2 起闸门只看 `engines.dsh`，所以对照
+`0.2.2-rc.2` / `0.2.2-rc.3` 上各跑过一次，并配了**闸门阳性对照**——rc.2 起闸门只看 `engines.dsh`，所以对照
 也改成打坏 `engines.dsh`：`^0.2.2-alpha.3`（过新）、`^0.1.7-rc.2`（跨元组）、空串三者直接调
 `evaluatePluginCompatibility` 都被拒，把坏副本装进隔离 profile 启动时也确实输出
-`skipping profile bundle … is incompatible with dsh 0.2.2-rc.2`——否则无法区分「闸门放行」
+`skipping profile bundle … is incompatible with dsh 0.2.2-rc.2`（rc.5 轮同样打了坏副本，输出点名 `0.2.2-rc.5`）——否则无法区分「闸门放行」
 与「闸门没跑」。
 
-### 历史修复记录（当前版本 1.0.18）
+### 历史修复记录（当前版本 1.0.19）
 
-本包版本已到 **1.0.18**；下面两张表是**历史**版本的修复记录，保留下来是因为它们记录了「代码为什么长这样」（表内的版本与 peer 范围是**当时**的，不是当前声明）。表里引用的 `0.1.5` / `0.1.6-alpha.x` 都是 **DSH 侧**（或 mcp-client 侧）的版本号，不是本包的版本。
+本包版本已到 **1.0.19**；下面几张表是**历史**版本的修复记录，保留下来是因为它们记录了「代码为什么长这样」（表内的版本与 peer 范围是**当时**的，不是当前声明）。表里引用的 `0.1.5` / `0.1.6-alpha.x` 都是 **DSH 侧**（或 mcp-client 侧）的版本号，不是本包的版本。
 
-#### 1.0.18（当前）：与官方 `@deepseek-ai/dsh-mcp-manager` 的设置条目认领冲突
+#### 1.0.19（当前）：核对并支持 DSH `0.2.2-rc.5`
+
+只做兼容性锁步，**无代码改动**。核对口径与结论：
+
+| 核对项 | 结论 |
+|---|---|
+| 依赖包导出面 | 19 个 `@deepseek-ai/*` 包的 `d.ts` 导出在 `0.2.2-rc.3` → `0.2.2-rc.5` **完全一致** |
+| 安装期闸门 | `dsh-app-boot` 的 `evaluatePluginCompatibility` / `unmetRequirements` / `runtimeVersionOf` **逐字节未变** |
+| 基础包 | cordis 4.1.0 / schemastery 3.19.0 / cosmokit 1.9.0 / cordis-plugin-loader 1.1.0 **均未变** |
+| `dsh-mcp-client` | `Config` 键与 error/warn 文案**未变**（`contract.test.js`、`log-contract.test.js` 均绿） |
+| 本包行为 | `npm test` 298 项：296 通过 + 2 条 POSIX-only 跳过，与 rc.3 一致 |
+| 隔离 profile | 7 个包安装成功、启动无装载报错、5 个客户端 bundle 可取、两个宿主路由在位 |
+
+#### 1.0.18（历史）：与官方 `@deepseek-ai/dsh-mcp-manager` 的设置条目认领冲突
 
 | 问题 | 影响 | 修法 |
 |---|---|---|
