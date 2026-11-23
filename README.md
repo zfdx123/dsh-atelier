@@ -28,10 +28,10 @@ dsh plugin --profile web add @zfdx123/dsh-memery
 
 ## 前置要求
 
-- DSH `^0.2.2-rc.5`（各包的 `engines.dsh` 与 peer 范围都声明这一条；1.0.19 起**只**支持这一版，`0.1.7-rc.2` / `0.2.0-rc.*` / `0.2.1-alpha.*` / `0.2.1-rc.*` 都不再被接纳）。一条 caret 收不下**跨元组**的 prerelease——严格 semver 只把 prerelease 候选交给「元组相同且自带 prerelease」的比较器，要同时支持两个元组就得写 `a || b`，两条缺一不可。安装期闸门在 `dsh-app-boot`：0.2.1-rc.2 起**有 `engines.dsh` 就只看它、peer 一律忽略**（0.2.2-rc.5 逐字节未变），所以决定装不装得上的是这一条 caret；它用 `includePrerelease: true` 判定，比严格 semver 宽，范围写宽了不会当场报错，要等到真正装不上才发现
-- Node `^22.19.0 || >=24.0.0`（`dsh-codegraph` / `dsh-skills-manager` 为 `>=22`，`dsh-memery` 为 `>=22.13`）
+- DSH `^0.2.3-alpha.2`（各包的 `engines.dsh` 与 peer 范围都声明这一条；1.0.20 起**只**支持这一版，`0.1.7-rc.2` / `0.2.0-rc.*` / `0.2.1-alpha.*` / `0.2.1-rc.*` 都不再被接纳）。一条 caret 收不下**跨元组**的 prerelease——严格 semver 只把 prerelease 候选交给「元组相同且自带 prerelease」的比较器，要同时支持两个元组就得写 `a || b`，两条缺一不可。安装期闸门在 `dsh-app-boot`：0.2.1-rc.2 起**有 `engines.dsh` 就只看它、peer 一律忽略**（0.2.3-alpha.2 逐字节未变），所以决定装不装得上的是这一条 caret；它用 `includePrerelease: true` 判定，比严格 semver 宽，范围写宽了不会当场报错，要等到真正装不上才发现
+- Node `^24.22.3 || >=26.13.1`（照抄 DSH 0.2.3 的 `engines.node`：内置 undici 首次包含 2026-11 安全修复的版本，早于它的 24.x / 26.x 都不再被支持）
 - 客户端界面用外壳自带的原生组件（`@deepseek-ai/dsh-client-ui-primitives`）；拿不到时逐处降级，不会白屏
-- peer `@deepseek-ai/cordis ~4.1.0`（照抄 DSH 自己的声明：0.2.2-rc.2 把基础包**转正**——cordis 从 `4.0.6-alpha.1` 到 `4.1.0`、schemastery 从 `3.18.6-alpha.1` 到 `3.19.0`、cosmokit 从 `1.8.7-alpha.1` 到 `1.9.0`。范围写旧了 `npm install` 直接 ERESOLVE——旧的 `~4.0.6-alpha.1` 上界是 `<4.1.0-0`，恰好把 `4.1.0` 挡在门外）
+- peer `@deepseek-ai/cordis ~4.2.0-alpha.1`（照抄 DSH 自己的声明：0.2.3-alpha.2 把四个基础包一起推到新的 prerelease——cordis `4.2.0-alpha.1`、schemastery `3.20.0-alpha.1`、cosmokit `1.10.0-alpha.1`、cordis-plugin-loader/include/group `1.2.0-alpha.1`。范围写旧了 `npm install` 直接 ERESOLVE——`~4.1.0` 的上界是 `<4.2.0-0`，恰好把 `4.2.0-alpha.1` 挡在门外）
 
 ## 装完没生效？
 

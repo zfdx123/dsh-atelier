@@ -150,13 +150,27 @@ describe('配置契约文档与 engines 声明跟着上游事实走', () => {
     )
   })
 
-  it('engines.node 覆盖 undici 的实际下限', () => {
-    // undici 是唯一带 Node 下限的运行时依赖（TLS 定向 dispatcher 用），
-    // 它一旦抬高下限而 engines 没跟上，插件会在受支持的 Node 上装出一个跑不动的组合。
+  it('engines.node 与宿主一致，且不低于 undici 的实际下限', () => {
+    // 0.2.3 起 DSH 自己要求 Node `^24.22.3 || >=26.13.1`（内置 undici 首次包含
+    // 2026-11 安全修复的版本）。插件与宿主同跑一个进程，所以照抄它——声明更宽只会
+    // 让人以为「Node 22 也能用」，而那样的 DSH 根本起不来。
+    assert.equal(pkg.engines.node, '^24.22.3 || >=26.13.1')
+    // 第二条不变量仍然保留：undici 是唯一带 Node 下限的运行时依赖（TLS 定向
+    // dispatcher 用它），我们的下限不得低于它，否则会在 undici 不支持的环境里装配成功。
     const undici = JSON.parse(readFileSync(createRequire(import.meta.url).resolve('undici/package.json'), 'utf8'))
     const floor = String(undici.engines.node).match(/\d+\.\d+\.\d+/)?.[0]
     assert.ok(floor, `undici 不再声明 engines.node？实际为 ${JSON.stringify(undici.engines.node)}`)
-    // DSH 生态的统一写法：偶数 LTS 线，24 起整数线全收。
-    assert.equal(pkg.engines.node, `^${floor} || >=24.0.0`)
+    const ours = pkg.engines.node.match(/(\d+\.\d+\.\d+)/)?.[1]
+    assert.ok(ours, `engines.node 里读不到具体下限：${pkg.engines.node}`)
+    const compare = (a, b) => {
+      const pa = a.split('.').map(Number)
+      const pb = b.split('.').map(Number)
+      for (let i = 0; i < 3; i += 1) if (pa[i] !== pb[i]) return pa[i] - pb[i]
+      return 0
+    }
+    assert.ok(
+      compare(ours, floor) >= 0,
+      `engines.node 的下限 ${ours} 低于 undici 要求的 ${floor}，会在 undici 不支持的 Node 上装出来`,
+    )
   })
 })

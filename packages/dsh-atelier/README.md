@@ -23,6 +23,6 @@ dsh plugin --profile web add @zfdx123/dsh-atelier
 > 不要再单独装其中的某个插件——那样同一个 id 会被插两次。要单个就只装那一个。
 
 - 仓库：<https://github.com/zfdx123/dsh-atelier>
-- 需要 DSH `^0.2.2-rc.5`（已实测）、Node `^22.19.0 || >=24.0.0`、peer `@deepseek-ai/cordis ~4.1.0`
+- 需要 DSH `^0.2.3-alpha.2`（已实测）、Node `^24.22.3 || >=26.13.1`、peer `@deepseek-ai/cordis ~4.2.0-alpha.1`
 
 MIT

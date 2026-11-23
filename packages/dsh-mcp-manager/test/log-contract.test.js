@@ -105,6 +105,23 @@ describe(`日志文案契约：${SOURCE_PATH}`, () => {
     assert.equal(update.detail, true)
     assert.match(update.message, /some future message/)
   })
+
+  it('按需加载专属的文案被识别为 neutral（已翻译，但不改挂载状态）', () => {
+    const literals = [
+      `mcp-client(_probe_): server tool "echo" is not offered because its name is the on-demand loader's`,
+      `mcp-client(_probe_): could not restore loaded tool "echo" for an agent: boom`,
+    ]
+    for (const text of literals) {
+      const update = mcpClientLogToStatus({ name: 'mcp-client', type: 'warn', level: 2, args: [text] })
+      assert.notEqual(update, null, `没有规则覆盖：${text}`)
+      assert.equal(update.neutral, true, `应标记为 neutral：${text}`)
+      assert.equal(update.state, null, `neutral 不应给出状态：${text}`)
+      assert.ok(
+        !update.message.startsWith('未识别的 mcp-client 日志：'),
+        `neutral 文案不应落到未识别透传：${text}`,
+      )
+    }
+  })
 })
 
 describe('抽取器自身（防止测试空转）', () => {

@@ -60,9 +60,9 @@
 // Harness contract: verified against DSH `0.1.5-rc.1` (CLI) with its
 // `0.1.5-rc.2` first-party packages, re-verified against DSH `0.1.6-alpha.1`,
 // `0.1.6-alpha.2`, `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-alpha.1`, `0.2.1-alpha.2`, `0.2.1-rc.2`,
-// and RE-VERIFIED AGAIN against DSH `0.2.2-rc.5` — the CLI running this checkout and
+// and RE-VERIFIED AGAIN against DSH `0.2.3-alpha.2` — the CLI running this checkout and
 // the first-party packages its devDependencies install; that run is `npm test`.
-// Since 1.0.19 `peerDependencies` and `engines.dsh` declare `^0.2.2-rc.5` only: a caret
+// Since 1.0.20 `peerDependencies` and `engines.dsh` declare `^0.2.3-alpha.2` only: a caret
 // carrying a prerelease has the upper bound `<X.Y.Z-0`, so it cannot admit a
 // *different* tuple's prerelease — semver matches a prerelease only against a
 // comparator carrying the same [major,minor,patch] tuple. Supporting two

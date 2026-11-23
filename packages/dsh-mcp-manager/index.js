@@ -625,7 +625,9 @@ export function apply(ctx, config) {
     levels: { default: 3 },
     export: (message) => {
       const update = mcpClientLogToStatus(message)
-      if (!update || !mountState.has(update.serverName)) return
+      // neutral：上游「按需加载」路径上的局部事件（本插件不输出 toolLoading，
+      // 正常装配下不会出现），已识别但不参与挂载状态合并。
+      if (!update || update.neutral === true || !mountState.has(update.serverName)) return
       // 成功日志（重连成功 / 重新同步工具）是「确实连上了」的正向证据，
       // 也是把 connecting 转成 ok 的两条路径之一（另一条是工具注册）。
       if (update.state === 'ok') confirmConnected(update.serverName)

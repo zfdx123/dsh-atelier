@@ -131,7 +131,7 @@ dsh plugin --profile web add @zfdx123/dsh-memery
    memory_* 工具 / 设置页路由 ────┘
 ```
 
-集成点（均按 DSH `^0.2.2-rc.5` 的运行时契约核实并实测；更早的 0.1.5-rc.1 / 0.2.0-rc.* / 0.2.1-alpha.* / 0.2.1-rc.* 是历史基线）：
+集成点（均按 DSH `^0.2.3-alpha.2` 的运行时契约核实并实测；更早的 0.1.5-rc.1 / 0.2.0-rc.* / 0.2.1-alpha.* / 0.2.1-rc.* 是历史基线）：
 
 - `ctx.tools.register(ToolDefinition)` —— 六个 `memory_*` 工具；
 - `ctx.on('agent/pre-step', …)` —— waterfall，把快照/命中拼进 `decision.messages`、插到真实用户消息之前；
@@ -156,15 +156,15 @@ dsh plugin --profile web add @zfdx123/dsh-memery
 
 ## 前置要求
 
-- **DSH `^0.2.2-rc.5`**（`package.json` 的 `engines.dsh`；peer 范围相同）；
-- **Node ≥ 22.13**（`node:sqlite` 的免标志下限，理由见「已知限制」）；本仓库整体要求 `^22.19.0 || >=24.0.0`；
+- **DSH `^0.2.3-alpha.2`**（`package.json` 的 `engines.dsh`；peer 范围相同）；
+- **Node `^24.22.3 || >=26.13.1`**（照抄 DSH 0.2.3 的 `engines.node`；本包自身对 `node:sqlite` 的免标志下限是 22.13，已被宿主要求覆盖）；
 - 装成 **profile bundle**（`dsh.bundle.patch` → `cordis.patch.yml`），并在 `dsh.client.platform: web` 的前端下使用——设置页只在 web 前端出现；
-- peer：`@deepseek-ai/cordis ~4.1.0`、`@deepseek-ai/dsh-llm ^0.2.2-rc.5`、`@deepseek-ai/dsh-tools ^0.2.2-rc.5`（最后一个声明为 optional peer）；
+- peer：`@deepseek-ai/cordis ~4.2.0-alpha.1`、`@deepseek-ai/dsh-llm ^0.2.3-alpha.2`、`@deepseek-ai/dsh-tools ^0.2.3-alpha.2`（最后一个声明为 optional peer）；
 - 不需要任何外部服务、端口、网络或 API key。
 
 ## 已知限制
 
-- **Node 下限是硬约束**。`node:sqlite` 在 Node 22.13 之前要显式加 `--experimental-sqlite`，本插件不会自己加这个标志，因此低于 22.13 的 Node 上插件起不来（`engines.node` 写的就是 `>=22.13`）。另外该模块上游仍标注为 experimental——这是 Node 侧的状态，不是本插件能决定的。
+- **Node 下限是硬约束**。`node:sqlite` 在 Node 22.13 之前要显式加 `--experimental-sqlite`，本插件不会自己加这个标志，因此低于 22.13 的 Node 上插件起不来（这条历史约束已被 DSH 0.2.3 的 Node 下限 `^24.22.3 || >=26.13.1` 覆盖）。另外该模块上游仍标注为 experimental——这是 Node 侧的状态，不是本插件能决定的。
 - **「全局」是数据，不是文案**。进全局库的判据是 `project` 字段的字面值 `全局`（或 `global`，去首尾空格、不区分大小写）；这个 token **不参与翻译**，所以英文界面下面板的项目选择器里同样写着 `全局`（en 字典里故意保留原文）。把库里已有的值改成别的写法，那条记忆就变成「项目记忆」而不是全局记忆了。
 - **跨工作区共享是显式选择，且没有访问控制**。只有 `project` 明确写「全局」的记忆才进全局库，之后**所有工作区都能搜到、改到、删掉**；写普通项目的记忆严格锁在当前工作区（别的工作区搜不到）。涉及敏感上下文的工作区请克制使用「全局」。把 `project` 从「全局」改成项目名会把记忆搬回工作区库，但已经泄漏出去的历史无法回收。
 - **快照只发生在「真首轮」**。只有当会话在本进程里第一次发消息、且历史事件里没有用户消息时才注入快照；从磁盘恢复的会话（已有历史）只走命中链路——它的快照靠上一个进程注入过的那一份。已见记账写在 `<工作区>/.dsh-memery/sessions/<sessionId>.json`，删掉这个文件等于让快照与命中重新注入一次。

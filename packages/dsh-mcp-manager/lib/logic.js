@@ -8,13 +8,19 @@
 //
 // mcp-client 配置契约（0.1.0-rc.6 起；0.1.5-rc.2 新增可选 reconnect；0.1.6 新增
 // 可选 maxInstructionBytes —— server instructions 的字节上限，两个 transport 通用，
-// 默认 32768。本插件不输出该键，缺省即走 mcp-client 的默认值）：
+// 默认 32768；0.2.3-alpha.1 又新增三项 —— toolLoading（`eager` | `on-demand`，
+// 两个 transport 通用，默认 eager）、catalogDescriptionMaxLength（按需加载时工具
+// 目录条目的描述上限，默认 160）、oauth（仅 streamable-http，OAuth 客户端配置，
+// 与 Authorization 头互斥）。这三项本插件都**不输出**：它们缺省即走 mcp-client 的
+// 默认值（eager / 160 / 无 OAuth），本插件也未提供对应设置项，属上游独有能力的
+// 功能缺口，不是兼容性要求）：
 //
 //   stdio:           { transport: 'stdio', serverName, command,
 //                      args: string[] = [], env: dict = {}, cwd = '',
 //                      toolCallTimeoutMs = 60000, closeTimeoutMs = 5000,
 //                      startupTimeoutMs?: number, expandTemplates = false,
 //                      failOnStartupError = false, maxInstructionBytes = 32768,
+//                      toolLoading = 'eager', catalogDescriptionMaxLength = 160,
 //                      reconnect?: { enabled = true, initialDelayMs = 500,
 //                                    maxDelayMs = 30000, maxAttempts = 10 } }
 //   streamable-http: { transport: 'streamable-http', serverName, url,
@@ -22,6 +28,8 @@
 //                      closeTimeoutMs = 5000, startupTimeoutMs?: number,
 //                      expandTemplates = false, failOnStartupError = false,
 //                      maxInstructionBytes = 32768,
+//                      toolLoading = 'eager', catalogDescriptionMaxLength = 160,
+//                      oauth?: McpOAuthConfig（与 headers.Authorization 互斥），
 //                      reconnect?: 同上 }
 //
 // 多余的键 schemastery 不会拒绝、也不会剥离（会原样保留），所以
@@ -252,6 +260,14 @@ const after = (content, prefix) => content.slice(prefix.length).replace(/^:\s*/,
  *
  * 每条规则必须覆盖上游真实文案；test/log-contract.test.js 会扫描实际安装的
  * mcp-client 源码逐个校验，漏了就变红。
+ *
+ * `neutral: true` 的规则表示「已识别，但**刻意不改挂载状态**」：这类文案只描述
+ * 按需加载（`toolLoading: 'on-demand'`）路径上的局部事件，与本插件的挂载状态
+ * 无关——本插件从不输出该键，正常装配下它们根本不会出现。识别它们的目的是
+ * **不让它们落到「未识别透传」兜底**（那条兜底会把日志报成 error，让用户在
+ * 一句「已挂载」旁边看到毫无因果关系的红点）；`mcpClientLogToStatus` 对这类规则
+ * 返回 `{ neutral: true, state: null }`，调用方（index.js 的 exporter）见到
+ * `neutral` 直接跳过状态合并。
  */
 export const MCP_LOG_RULES = [
   {
@@ -360,6 +376,22 @@ export const MCP_LOG_RULES = [
     match: (content) => content === 'cleanup incomplete',
     build: () => ({ state: 'error', message: '连接清理未完成：需重启 Host 才能彻底释放', detail: false }),
   },
+  {
+    // 0.2.3-alpha.1 新增（按需加载专属）：服务器的某个工具与按需加载器自己的工具同名，
+    // 上游选择不提供它。只发生在 toolLoading: 'on-demand'，本插件不输出该键 → 不会触发。
+    name: '按需加载器同名工具未提供',
+    neutral: true,
+    match: (content) => content.includes('is not offered because its name is the on-demand loader'),
+    message: () => '某个工具与按需加载器的工具同名，未被提供（仅按需加载模式）',
+  },
+  {
+    // 0.2.3-alpha.1 新增（按需加载专属）：为某个 agent 恢复已加载工具时注册失败。
+    // 只发生在 on-demand 的 per-agent 恢复路径，本插件不输出 toolLoading → 不会触发。
+    name: '按需加载工具恢复失败',
+    neutral: true,
+    match: (content) => content.startsWith('could not restore loaded tool'),
+    message: (content) => `已加载工具恢复失败（仅按需加载模式）：${after(content, 'could not restore loaded tool')}`,
+  },
 ]
 
 export function mcpClientLogToStatus(message) {
@@ -373,7 +405,12 @@ export function mcpClientLogToStatus(message) {
   const content = match[2].trim()
 
   for (const rule of MCP_LOG_RULES) {
-    if (rule.match(content)) return { serverName, ...rule.build(content) }
+    if (!rule.match(content)) continue
+    // neutral 规则：已识别但刻意不改状态，调用方见到 neutral 会跳过合并。
+    if (rule.neutral === true) {
+      return { serverName, neutral: true, state: null, message: rule.message(content), detail: false }
+    }
+    return { serverName, ...rule.build(content) }
   }
 
   // 兜底：规则表漏掉的 error/warn 透传原文，绝不静默——「未知」不该等于
